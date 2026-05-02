@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pentagon Payment Processor — API Documentation</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card-bg: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-dim: #8b949e;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --orange: #d29922;
+            --red: #f85149;
+            --purple: #bc8cff;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+        h1 { color: #fff; font-size: 2rem; margin-bottom: 0.5rem; }
+        h1 span { color: var(--accent); }
+        .subtitle { color: var(--text-dim); font-size: 1.1rem; margin-bottom: 2rem; }
+        h2 {
+            color: #fff;
+            font-size: 1.4rem;
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        h3 { color: var(--accent); font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        p { margin-bottom: 1rem; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        .badge-get { background: rgba(59,130,246,0.15); color: #58a6ff; }
+        .badge-post { background: rgba(63,185,80,0.15); color: #3fb950; }
+        .badge-chain { background: rgba(188,140,255,0.15); color: #bc8cff; }
+        .badge-live { background: rgba(63,185,80,0.15); color: #3fb950; }
+        .badge-planned { background: rgba(210,153,34,0.15); color: #d29922; }
+        .endpoint {
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            font-size: 0.95rem;
+            color: #fff;
+        }
+        code, pre {
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            font-size: 0.875rem;
+        }
+        code {
+            background: rgba(110,118,129,0.15);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        pre {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+        th { color: var(--text-dim); font-size: 0.85rem; text-transform: uppercase; }
+        td code { font-size: 0.8rem; }
+        .flow-diagram {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            font-family: monospace;
+            white-space: pre;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+            line-height: 1.4;
+            font-size: 0.85rem;
+        }
+        .toc { list-style: none; padding-left: 0; }
+        .toc li { margin-bottom: 0.4rem; }
+        .toc li::before { content: "→ "; color: var(--text-dim); }
+        .status-table td:first-child { font-weight: 600; }
+        footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-dim);
+            font-size: 0.85rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <h1>Pentagon <span>Payment Processor</span></h1>
+    <p class="subtitle">Centralized cross-chain payment stack for Pentagon Games ecosystem</p>
+
+    <div class="card">
+        <strong>Quick Links:</strong>
+        <ul class="toc">
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#contracts">Smart Contracts</a></li>
+            <li><a href="#payment-flow">Payment Flow</a></li>
+            <li><a href="#sku-config">SKU Configuration</a></li>
+            <li><a href="#api">API Endpoints</a></li>
+            <li><a href="#integration">Integration Guide</a></li>
+            <li><a href="#referral">Referral &amp; Revenue</a></li>
+        </ul>
+    </div>
+
+    <!-- OVERVIEW -->
+    <h2 id="overview">1. Overview</h2>
+    <p>
+        The Pentagon Payment Processor is a centralized smart contract + backend system that handles
+        payments across multiple chains and payment methods. Products in the Pentagon ecosystem
+        (EtherFantasy, Gunnies, Setsuko, etc.) use the same contracts and backend for payment
+        processing, revenue tracking, and reward fulfillment.
+    </p>
+
+    <h3>Supported Payment Methods</h3>
+    <table>
+        <tr><th>Method</th><th>Chain</th><th>Contract Function</th></tr>
+        <tr>
+            <td>PC (native)</td>
+            <td><span class="badge badge-chain">Pentagon 3344</span></td>
+            <td><code>purchaseWithNative(skuId)</code></td>
+        </tr>
+        <tr>
+            <td>USDC</td>
+            <td><span class="badge badge-chain">Ethereum</span></td>
+            <td><code>purchaseWithToken(skuId, tokenAddress)</code></td>
+        </tr>
+        <tr>
+            <td>PC (ERC-20)</td>
+            <td><span class="badge badge-chain">Ethereum</span></td>
+            <td><code>purchaseWithToken(skuId, tokenAddress)</code></td>
+        </tr>
+        <tr>
+            <td>Stripe (fiat)</td>
+            <td>Off-chain</td>
+            <td>Stripe Checkout → webhook</td>
+        </tr>
+    </table>
+
+    <!-- CONTRACTS -->
+    <h2 id="contracts">2. Smart Contracts</h2>
+    <p>One <code>PaymentProcessor</code> contract deployed per chain. Same Solidity source, same interface.</p>
+
+    <div class="card">
+        <h3>Pentagon Chain (3344)</h3>
+        <table>
+            <tr><td>Contract</td><td><code>0x3930B34a524170Cc8966859Da167DB7B5413A0ba</code></td></tr>
+            <tr><td>Owner</td><td><code>0xB2e3e82a95f5c4c47E30A5b420Ac4f99d32EF61f</code></td></tr>
+            <tr><td>Payment Token</td><td>PC (native)</td></tr>
+            <tr><td>Explorer</td><td><a href="https://explorer.pentagon.games/address/0x3930B34a524170Cc8966859Da167DB7B5413A0ba">View on Explorer</a></td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>Ethereum Mainnet (1)</h3>
+        <table>
+            <tr><td>Contract</td><td><code>0xe6bde156369d209c4d420e966541ee17093705b5</code></td></tr>
+            <tr><td>Owner</td><td><code>0xB2e3e82a95f5c4c47E30A5b420Ac4f99d32EF61f</code></td></tr>
+            <tr><td>USDC</td><td><code>0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48</code></td></tr>
+            <tr><td>PC (ERC-20)</td><td><code>0x6c3ea9036406852006290770bedfcaba0e23a0e8</code></td></tr>
+            <tr><td>Explorer</td><td><a href="https://etherscan.io/address/0xe6bde156369d209c4d420e966541ee17093705b5">View on Etherscan</a></td></tr>
+        </table>
+    </div>
+
+    <h3>Contract Interface</h3>
+    <pre>
+// Read prices
+mapping(uint256 => mapping(address => uint256)) public prices;
+// skuConfigs[skuId] → (MintType, distributor)
+mapping(uint256 => SkuConfig) public skuConfigs;
+
+// Owner-only: configure SKUs
+function setPrice(uint256 skuId, address token, uint256 price) external onlyOwner;
+function setSkuConfig(uint256 skuId, MintType mintType, address distributor) external onlyOwner;
+
+// User purchase functions
+function purchaseWithNative(uint256 skuId) external payable;
+function purchaseWithToken(uint256 skuId, address tokenAddress) external;
+
+// Owner-only: withdraw collected funds
+function withdrawNative() external onlyOwner;
+function withdrawToken(address tokenAddress) external onlyOwner;
+
+// Events
+event PaymentReceived(uint256 indexed skuId, address indexed buyer, bool indexed minted);
+event DirectMintSuccessful(uint256 indexed skuId, address indexed buyer, address distributor);
+event DirectMintFailed(uint256 indexed skuId, address indexed buyer, address distributor);
+    </pre>
+
+    <!-- PAYMENT FLOW -->
+    <h2 id="payment-flow">3. Payment Flow</h2>
+
+    <h3>On-Chain (PC / USDC / ERC-20)</h3>
+    <div class="flow-diagram">
+User → PaymentProcessor.purchaseWithNative(skuId)   [Pentagon Chain]
+   or  PaymentProcessor.purchaseWithToken(skuId, token) [Ethereum]
+       │
+       ├─ Contract checks: prices[skuId][token] > 0, amount matches exactly
+       ├─ Contract transfers payment to itself
+       ├─ If skuConfig = DIRECT → calls distributor.mintTo(buyer) on same chain
+       ├─ If skuConfig = BACKEND → emits event only
+       │
+       └─ Emits: PaymentReceived(skuId, buyer, minted)
+              │
+              ▼
+       Backend Scanner (ef-scanner-pc / ef-scanner-eth)
+              │
+              ├─ Picks up PaymentReceived event
+              ├─ Creates cross_chain_purchase_log record
+              ├─ Triggers reward fulfillment (mint NFT / send tokens)
+              └─ Updates status: pending → processing → completed
+    </div>
+
+    <h3>Stripe (Fiat)</h3>
+    <div class="flow-diagram">
+User → Stripe Checkout Session (pentagon.games/account)
+       │
+       ├─ Stripe processes payment
+       ├─ Sends webhook: checkout.session.completed
+       │
+       └─ Backend receives webhook at /stripe/webhook
+              │
+              ├─ Validates Stripe signature
+              ├─ Creates cross_chain_purchase_log (payment_method: "stripe")
+              ├─ Triggers reward fulfillment
+              └─ Updates status: confirmed → completed
+    </div>
+
+    <!-- SKU CONFIG -->
+    <h2 id="sku-config">4. SKU Configuration</h2>
+
+    <h3>Current SKUs</h3>
+    <table>
+        <tr><th>SKU</th><th>Product</th><th>Pentagon (PC)</th><th>ETH (USDC)</th><th>ETH (PC ERC20)</th><th>Reward</th></tr>
+        <tr>
+            <td><code>9</code></td>
+            <td>EtherFantasy Character</td>
+            <td>0.25 PC</td>
+            <td>$8</td>
+            <td>0.25 PC</td>
+            <td>Mint NFT on Pentagon</td>
+        </tr>
+        <tr>
+            <td><code>17</code></td>
+            <td>1000 NPC Credits</td>
+            <td>1 PC</td>
+            <td>$35</td>
+            <td>Not set</td>
+            <td>Send 1 PC to buyer</td>
+        </tr>
+    </table>
+
+    <h3>Adding a New SKU</h3>
+    <p>Owner calls on each chain's contract:</p>
+    <pre>
+// 1. Set price (per token, per chain)
+setPrice(skuId, tokenAddress, priceInSmallestUnit)
+// Use address(0) for native token
+
+// 2. Configure fulfillment
+setSkuConfig(skuId, mintType, distributorAddress)
+// mintType: 0 = BACKEND (cross-chain, backend fulfills)
+//           1 = DIRECT (same-chain, contract calls distributor.mintTo)
+
+// 3. Add to cross_chain_payment_config table in backend DB
+INSERT INTO cross_chain_payment_config
+  (sku_id, sku_name, item_type, item_name, amount, contract_chain_id, ...)
+    </pre>
+
+    <!-- API -->
+    <h2 id="api">5. API Endpoints</h2>
+
+    <div class="card">
+        <span class="badge badge-planned">PLANNED</span>
+        <p>Base URL: <code>https://api.payment.pentagon.games</code></p>
+        <p>Authentication: App Key via <code>X-PG-App-Key</code> header</p>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/v1/payments</span>
+        <p>List all payments with optional filters.</p>
+        <table>
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>buyer</code></td><td>address</td><td>Filter by buyer wallet</td></tr>
+            <tr><td><code>sku_id</code></td><td>int</td><td>Filter by SKU</td></tr>
+            <tr><td><code>chain_id</code></td><td>int</td><td>Filter by chain</td></tr>
+            <tr><td><code>status</code></td><td>string</td><td>pending | confirmed | completed | failed</td></tr>
+            <tr><td><code>from</code></td><td>date</td><td>Start date (YYYY-MM-DD)</td></tr>
+            <tr><td><code>to</code></td><td>date</td><td>End date (YYYY-MM-DD)</td></tr>
+            <tr><td><code>page</code></td><td>int</td><td>Page number (default 1)</td></tr>
+            <tr><td><code>limit</code></td><td>int</td><td>Per page (default 50, max 200)</td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/v1/payments/summary</span>
+        <p>Monthly revenue summary grouped by chain, token, and SKU.</p>
+        <pre>
+{
+  "total_revenue_usd": 12450.00,
+  "months": [
+    {
+      "month": "2026-03",
+      "payments": 6283,
+      "revenue": {
+        "pc_pentagon": { "amount": 1570.75, "count": 6275 },
+        "usdc_eth": { "amount": 64.00, "count": 8 }
+      }
+    }
+  ],
+  "withdrawable": {
+    "pentagon": { "pc": 614.925 },
+    "ethereum": { "usdc": 183.17, "pc_erc20": 0 }
+  }
+}
+        </pre>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/v1/payments/by-buyer/{address}</span>
+        <p>All payments for a specific wallet. Used by VIP referral system.</p>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-post">POST</span>
+        <span class="endpoint">/api/v1/webhooks/subscribe</span>
+        <p>Subscribe to payment events. Receive callbacks when payments are confirmed.</p>
+        <pre>
+{
+  "url": "https://vip.pentagon.games/api/payment-callback",
+  "events": ["payment.confirmed", "payment.completed"],
+  "sku_ids": [9, 17]
+}
+        </pre>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-post">POST</span>
+        <span class="endpoint">/stripe/webhook</span>
+        <span class="badge badge-live">LIVE</span>
+        <p>Stripe webhook endpoint. Receives <code>checkout.session.completed</code> events.</p>
+        <p>Endpoint: <code>https://api.account.pentagon.games/stripe/webhook</code></p>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-post">POST</span>
+        <span class="endpoint">/stripe/payment_status</span>
+        <span class="badge badge-live">LIVE</span>
+        <p>Check payment status for a Stripe purchase.</p>
+        <table>
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>sku_id</code></td><td>int</td><td>SKU identifier</td></tr>
+            <tr><td><code>order_id</code></td><td>string</td><td>Stripe checkout session ID</td></tr>
+            <tr><td><code>buyer</code></td><td>address</td><td>Buyer's wallet address</td></tr>
+        </table>
+    </div>
+
+    <!-- INTEGRATION -->
+    <h2 id="integration">6. Integration Guide</h2>
+
+    <h3>For New Products</h3>
+    <ol>
+        <li>Request a SKU ID from admin</li>
+        <li>Admin sets price on each chain's contract via <code>setPrice()</code></li>
+        <li>Admin configures fulfillment via <code>setSkuConfig()</code></li>
+        <li>Add SKU config to <code>cross_chain_payment_config</code> table</li>
+        <li>Frontend calls <code>purchaseWithNative()</code> or <code>purchaseWithToken()</code></li>
+        <li>Backend cron handles reward delivery automatically</li>
+    </ol>
+
+    <h3>Frontend Example (viem/wagmi)</h3>
+    <pre>
+// Purchase with native PC on Pentagon Chain
+const { writeContract } = useWriteContract();
+
+await writeContract({
+  address: '0x3930B34a524170Cc8966859Da167DB7B5413A0ba',
+  abi: paymentProcessorAbi,
+  functionName: 'purchaseWithNative',
+  args: [9n], // SKU ID
+  value: parseEther('0.25'), // Must match contract price exactly
+  chain: pentagonChain,
+});
+
+// Purchase with USDC on Ethereum
+// Step 1: Approve USDC spend
+await writeContract({
+  address: USDC_ADDRESS,
+  abi: erc20Abi,
+  functionName: 'approve',
+  args: [PAYMENT_PROCESSOR_ETH, 8000000n], // $8 USDC
+});
+
+// Step 2: Purchase
+await writeContract({
+  address: PAYMENT_PROCESSOR_ETH,
+  abi: paymentProcessorAbi,
+  functionName: 'purchaseWithToken',
+  args: [9n, USDC_ADDRESS],
+});
+    </pre>
+
+    <!-- REFERRAL -->
+    <h2 id="referral">7. Referral &amp; Revenue</h2>
+
+    <h3>VIP Referral Integration</h3>
+    <p>
+        When a payment is confirmed, the payment processor notifies the VIP referral system.
+        If the buyer was referred by a VIP member, a commission is calculated based on the
+        referrer's tier.
+    </p>
+    <table>
+        <tr><th>VIP Tier</th><th>Commission Rate</th></tr>
+        <tr><td>VIP1</td><td>0% (view only)</td></tr>
+        <tr><td>VIP2</td><td>5%</td></tr>
+        <tr><td>VIP3</td><td>15%</td></tr>
+        <tr><td>Partner</td><td>20% (custom)</td></tr>
+    </table>
+
+    <h3>Commissionable Events</h3>
+    <table>
+        <tr><th>Event</th><th>Commissionable</th></tr>
+        <tr><td>ETH chain NFT purchases</td><td>✅ Yes</td></tr>
+        <tr><td>Stripe/PayPal payments</td><td>✅ Yes</td></tr>
+        <tr><td>ETH → PC Bridge deposits</td><td>✅ Yes</td></tr>
+        <tr><td>Cross-chain purchases (USDC)</td><td>✅ Yes</td></tr>
+        <tr><td>PC-on-PC purchases</td><td>❌ No (internal)</td></tr>
+    </table>
+
+    <h3>Revenue Reporting</h3>
+    <p>
+        The <code>/api/v1/payments/summary</code> endpoint provides monthly revenue breakdowns.
+        Funds can be withdrawn by the contract owner via <code>withdrawNative()</code> and
+        <code>withdrawToken()</code>.
+    </p>
+
+    <div class="card">
+        <h3>Current Balances (Withdrawable)</h3>
+        <table>
+            <tr><td>Pentagon Chain Contract</td><td><strong>614.925 PC</strong></td></tr>
+            <tr><td>ETH Contract (USDC)</td><td><strong>$183.17</strong></td></tr>
+            <tr><td>ETH Contract (ETH)</td><td>0</td></tr>
+            <tr><td>ETH Contract (PC ERC-20)</td><td>0</td></tr>
+        </table>
+        <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 0.5rem;">Last updated: 2026-05-02</p>
+    </div>
+
+    <footer>
+        Pentagon Games &mdash; Payment Processor Documentation<br>
+        <a href="https://github.com/blockchainsuperheroes/products-crosschain-payment">GitHub Repo</a> &middot;
+        <a href="https://pentagon.games">pentagon.games</a> &middot;
+        <a href="https://blockchainsuperheroes.github.io/pg-identity-docs/">Identity API Docs</a>
+    </footer>
+
+</div>
+</body>
+</html>
