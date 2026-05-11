@@ -130,6 +130,7 @@
         <strong>Quick Links:</strong>
         <ul class="toc">
             <li><a href="#overview">Overview</a></li>
+            <li><a href="#not-for">What This Is NOT</a></li>
             <li><a href="#contracts">Smart Contracts</a></li>
             <li><a href="#payment-flow">Payment Flow</a></li>
             <li><a href="#sku-config">SKU Configuration</a></li>
@@ -172,6 +173,58 @@
             <td>Stripe Checkout → webhook</td>
         </tr>
     </table>
+
+    <!-- WHAT THIS IS NOT -->
+    <h2 id="not-for">What This Is NOT</h2>
+    <div class="card">
+        <p>The payment processor handles <strong>payments and fulfillment</strong>. It does not own or gatekeep NFT metadata, images, or ownership data. Understanding the boundary helps you integrate correctly.</p>
+    </div>
+
+    <table>
+        <tr><th>Not This</th><th>Use This Instead</th></tr>
+        <tr>
+            <td>NFT metadata storage or image hosting</td>
+            <td><a href="https://blockchainsuperheroes.github.io/pg-nft-data-docs/">NFT Data API</a> &mdash; the centralized index for ownership, metadata, and images</td>
+        </tr>
+        <tr>
+            <td>The only way to mint</td>
+            <td>Projects can self-mint using their own backend. Grant our payment processor moderator/minter access to mint <em>in parallel</em>, not instead of your own minting</td>
+        </tr>
+        <tr>
+            <td>The gatekeeper for NFT data updates</td>
+            <td>Any authorized caller (your project backend, pfpvault admin panel, payment processor) can call the NFT Data API refresh endpoint directly</td>
+        </tr>
+        <tr>
+            <td>A metadata management system</td>
+            <td>After fulfillment (mint, upgrade, etc.), the caller notifies NFT Data API to refresh. Payment processor is one such caller, not the only one</td>
+        </tr>
+        <tr>
+            <td>A replacement for your project's backend</td>
+            <td>Your backend handles your product logic (upgrades, game state, etc.). Payment processor just detects payments and triggers fulfillment</td>
+        </tr>
+    </table>
+
+    <h3>How It Fits Together</h3>
+    <div class="flow-diagram">
+Payment Processor          NFT Data API             Your Project Backend
+  (payments + fulfillment)   (metadata + ownership)   (product logic)
+        │                         ▲                         ▲
+        │   ┌─────────────────────┤                         │
+        │   │  Any of these can   │                         │
+        │   │  call refresh:      │                         │
+        │   │                     │                         │
+        ├───┘  payment processor ─┤                         │
+        │      project backend  ──┤                         │
+        │      pfpvault admin   ──┘                         │
+        │      user self-serve                              │
+        │                                                   │
+        └── "fulfill this" webhook ─────────────────────────┘
+            (project does the work, returns proof)
+    </div>
+
+    <p>
+        <strong>The pattern:</strong> Payment processor detects payment, calls your project webhook to fulfill, your project does its thing (mint, upgrade, whatever), then <em>whoever did the work</em> notifies NFT Data API to refresh. For projects that self-mint without going through payments, they call NFT Data API directly. Same endpoint, same app key.
+    </p>
 
     <!-- CONTRACTS -->
     <h2 id="contracts">2. Smart Contracts</h2>
