@@ -320,24 +320,70 @@ User → Stripe Checkout Session (pentagon.games/account)
 
     <h3>Current SKUs</h3>
     <table>
-        <tr><th>SKU</th><th>Product</th><th>Pentagon (PC)</th><th>ETH (USDC)</th><th>ETH (PC ERC20)</th><th>Reward</th></tr>
-        <tr>
-            <td><code>9</code></td>
-            <td>EtherFantasy Character</td>
-            <td>0.25 PC</td>
-            <td>$8</td>
-            <td>0.25 PC</td>
-            <td>Mint NFT on Pentagon</td>
-        </tr>
-        <tr>
-            <td><code>17</code></td>
-            <td>1000 NPC Credits</td>
-            <td>1 PC</td>
-            <td>$35</td>
-            <td>Not set</td>
-            <td>Send 1 PC to buyer</td>
-        </tr>
+        <tr><th>SKU</th><th>Product</th><th>Chain</th><th>Price (USD)</th><th>Fulfillment</th><th>Status</th></tr>
+        <tr><td><code>2</code></td><td>Tamago</td><td>PC (3344)</td><td>$10</td><td>Centralized mint</td><td>✅ Live</td></tr>
+        <tr><td><code>3</code></td><td>Vaelion</td><td>PC (3344)</td><td>$10</td><td>Centralized mint</td><td>✅ Live</td></tr>
+        <tr><td><code>4</code></td><td>No5</td><td>PC (3344)</td><td>$10</td><td>Centralized mint</td><td>✅ Live</td></tr>
+        <tr><td><code>5</code></td><td>Muskl</td><td>SKALE Nebula</td><td>$50</td><td>Centralized mint + gas bonus (0.5 PC)</td><td>✅ Live</td></tr>
+        <tr><td><code>7</code></td><td>Monad Hero</td><td>Monad (143)</td><td>$25</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
+        <tr><td><code>9</code></td><td>EtherFantasy Character</td><td>PC (3344)</td><td>$0.10–$10</td><td><strong>Project-managed</strong> (see below)</td><td>⚠️ Project</td></tr>
+        <tr><td><code>11</code></td><td>ARB Hero — Lazuli</td><td>Arbitrum</td><td>$260</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
+        <tr><td><code>12</code></td><td>Core Hero</td><td>Core (1116)</td><td>$10</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
+        <tr><td><code>13</code></td><td>Polygon Hero — Avyaan</td><td>Polygon</td><td>$200</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
+        <tr><td><code>14</code></td><td>Avax Hero — Launch</td><td>Avalanche</td><td>$50</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
+        <tr><td><code>15</code></td><td>BNB Hero — Sentinel</td><td>BSC</td><td>$400</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
+        <tr><td><code>17</code></td><td>1000 NPC Credits</td><td>PC (3344)</td><td>$35</td><td>Centralized (token send)</td><td>✅ Live</td></tr>
     </table>
+
+    <h3 id="fulfillment-modes">Fulfillment Modes</h3>
+    <p>The payment processor supports two fulfillment modes per SKU:</p>
+
+    <div class="card">
+        <h3>Mode 1: Centralized Fulfillment (default)</h3>
+        <p>The payment processor backend mints the NFT directly using a shared minter wallet. Project grants <code>MINTER_ROLE</code> to the payment processor's moderator address. No project backend needed.</p>
+        <pre>
+User pays → Scanner captures event → Fulfillment service mints NFT → Done
+
+Requirements:
+  1. Deploy your NFT contract with a mintTo(address) or mintNextToken(address) function
+  2. Grant minter role to: 0x9A7c1e986e49C2Ace0e85Ccc6eeeb262D46b7521
+  3. Register SKU with contract address + mint ABI in cross_chain_payment_config
+  4. Set price on PaymentProcessor contract
+
+Used by: Tamago, Vaelion, No5, Muskl, all Chain Heroes, NPC Credits
+        </pre>
+    </div>
+
+    <div class="card">
+        <h3>Mode 2: Project-Managed Fulfillment</h3>
+        <p>The payment processor captures the payment event for revenue tracking and referral commissions, but the project's own backend handles delivery. Use this when fulfillment requires game-specific logic (character assignment, inventory, etc.) that the centralized processor can't handle.</p>
+        <pre>
+User pays → Scanner captures event → Record stored in pg_payments_db
+                                      (revenue tracked, referrals calculated)
+         → Project's own scanner also picks up event
+         → Project backend handles mint/delivery from its own DB
+
+Requirements:
+  1. Project runs its own scanner watching the PaymentProcessor contract
+  2. Project handles minting/delivery independently
+  3. SKU is NOT added to cross_chain_payment_config (prevents centralized fulfillment)
+  4. Payment data still flows through pg_payments_db for referral/revenue tracking
+
+Used by: EtherFantasy (SKU 9)
+        </pre>
+    </div>
+
+    <div class="card">
+        <h3>Example: EtherFantasy (Project-Managed, SKU 9)</h3>
+        <p>EtherFantasy runs its own Node.js/TypeScript backend with:</p>
+        <ul>
+            <li><code>ef-scanner-pc</code> — Watches Pentagon Chain PaymentProcessor for SKU 9 events (every 15s)</li>
+            <li><code>ef-scanner-eth</code> — Watches ETH mainnet PaymentProcessor for SKU 9 events</li>
+            <li><code>processMint()</code> — Assigns next available character, mints to buyer, tracks in local MySQL DB</li>
+        </ul>
+        <p>The centralized scanner also captures SKU 9 events into <code>pg_payments_db</code> for revenue reporting and referral commission calculation. But it does not attempt to fulfill — SKU 9 has no entry in <code>cross_chain_payment_config</code>, so the centralized fulfillment service skips it.</p>
+        <p>This pattern works for any project with complex delivery logic. The centralized stack handles money, the project handles product.</p>
+    </div>
 
     <h3>Adding a New SKU</h3>
     <p>Owner calls on each chain's contract:</p>
@@ -430,34 +476,122 @@ INSERT INTO cross_chain_payment_config
         <span class="badge badge-post">POST</span>
         <span class="endpoint">/stripe/webhook</span>
         <span class="badge badge-live">LIVE</span>
-        <p>Stripe webhook endpoint. Receives <code>checkout.session.completed</code> events.</p>
+        <p>Centralized Stripe webhook endpoint. Receives <code>checkout.session.completed</code> events from multiple Stripe accounts.</p>
         <p>Endpoint: <code>https://api.account.pentagon.games/stripe/webhook</code></p>
+        <p>Supports multiple Stripe accounts (e.g., NPC Collections + BCSH Collections). The backend verifies the webhook signature against each configured secret until one matches. All payments write to <code>pg_payments_db</code> regardless of which Stripe account processed them.</p>
+        <h3>Stripe Checkout Metadata (required)</h3>
+        <p>When creating a Stripe Checkout Session, include these fields in <code>metadata</code>:</p>
+        <table>
+            <tr><th>Key</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>skuId</code></td><td>int</td><td>SKU identifier (must match a registered SKU)</td></tr>
+            <tr><td><code>wallet</code></td><td>address</td><td>Buyer's EVM wallet address (NFT will be minted here)</td></tr>
+        </table>
+        <h3>Webhook Response</h3>
+        <pre>
+// Success
+{"status": true, "message": "payment_completed"}
+
+// Missing metadata
+{"status": false, "message": "missing_metadata"}  // 400
+
+// Invalid signature (doesn't match any configured account)
+{"status": false, "message": "Invalid signature"}  // 400
+        </pre>
+        <h3>Adding a New Stripe Account</h3>
+        <p>To onboard a new project's Stripe account to the centralized webhook:</p>
+        <ol>
+            <li>Get the project's Stripe webhook secret (<code>whsec_...</code>)</li>
+            <li>Add it to the backend <code>.env</code> as <code>STRIPE_WEBHOOK_SECRET_&lt;PROJECT&gt;</code></li>
+            <li>Add it to the <code>STRIPE_WEBHOOK_SECRETS</code> list in <code>settings.py</code></li>
+            <li>Restart pentagon-login-backend</li>
+            <li>Project updates their Stripe dashboard webhook URL to <code>https://api.account.pentagon.games/stripe/webhook</code></li>
+        </ol>
+        <h3>Current Stripe Accounts</h3>
+        <table>
+            <tr><th>Account</th><th>SKUs</th><th>Status</th></tr>
+            <tr><td>NPC Collections</td><td>SKU 17 (NPC Credits)</td><td>✅ Live</td></tr>
+            <tr><td>BCSH Collections</td><td>SKUs 2, 3, 4 (Tamago, Vaelion, No5)</td><td>✅ Live</td></tr>
+        </table>
     </div>
 
     <div class="card">
         <span class="badge badge-post">POST</span>
         <span class="endpoint">/stripe/payment_status</span>
         <span class="badge badge-live">LIVE</span>
-        <p>Check payment status for a Stripe purchase.</p>
+        <p>Check payment status for a Stripe purchase. Reads from <code>pg_payments_db</code>. Works for any SKU regardless of which Stripe account processed it.</p>
         <table>
             <tr><th>Param</th><th>Type</th><th>Description</th></tr>
             <tr><td><code>sku_id</code></td><td>int</td><td>SKU identifier</td></tr>
-            <tr><td><code>order_id</code></td><td>string</td><td>Stripe checkout session ID</td></tr>
+            <tr><td><code>order_id</code></td><td>string</td><td>Stripe checkout session ID (<code>cs_live_...</code>)</td></tr>
             <tr><td><code>buyer</code></td><td>address</td><td>Buyer's wallet address</td></tr>
+        </table>
+        <h3>Response</h3>
+        <pre>
+// Found
+{
+  "success": true,
+  "result": {
+    "id": 12257,
+    "tx_hash": "cs_live_a1ccPzX7...",
+    "chain_id": 8888,
+    "block_number": 0,
+    "buyer": "0x1fdf1637...",
+    "sku_id": 3,
+    "reward_status": "completed",       // pending | processing | completed | failed
+    "payment_method": "stripe",
+    "purchase_status": "confirmed",
+    "created_at": "2026-05-18T08:04:47.561900+00:00",
+    "updated_at": "2026-05-20T03:22:11.291272+00:00",
+    "reward_tx_hash": "0x99d815d2...",  // mint transaction hash (null if not yet fulfilled)
+    "reward_chain_id": 3344             // chain where NFT was minted
+  }
+}
+
+// Not found
+{"status": false, "message": "Data Not found"}
+        </pre>
+        <h3>Reward Status Values</h3>
+        <table>
+            <tr><th>Status</th><th>Meaning</th></tr>
+            <tr><td><code>pending</code></td><td>Payment confirmed, awaiting fulfillment (within 5 minutes)</td></tr>
+            <tr><td><code>processing</code></td><td>Fulfillment in progress (minting transaction sent)</td></tr>
+            <tr><td><code>completed</code></td><td>NFT minted and delivered. <code>reward_tx_hash</code> contains the mint transaction.</td></tr>
+            <tr><td><code>failed</code></td><td>Fulfillment failed (contract error, gas issue, etc.)</td></tr>
         </table>
     </div>
 
     <!-- INTEGRATION -->
     <h2 id="integration">6. Integration Guide</h2>
 
-    <h3>For New Products</h3>
+    <h3>For New Products (Centralized Fulfillment)</h3>
+    <ol>
+        <li>Request a SKU ID from admin</li>
+        <li>Deploy your NFT contract with a <code>mintTo(address)</code> or <code>mintNextToken(address)</code> function</li>
+        <li>Grant <code>MINTER_ROLE</code> to moderator address: <code>0x9A7c1e986e49C2Ace0e85Ccc6eeeb262D46b7521</code></li>
+        <li>Admin sets price on each chain's contract via <code>setPrice()</code></li>
+        <li>Admin configures fulfillment via <code>setSkuConfig()</code></li>
+        <li>Add SKU config to <code>cross_chain_payment_config</code> table (contract address, chain, mint ABI)</li>
+        <li>Frontend calls <code>purchaseWithNative()</code> or <code>purchaseWithToken()</code></li>
+        <li>Fulfillment service automatically mints NFT to buyer within 5 minutes</li>
+    </ol>
+
+    <h3>For New Products (Project-Managed Fulfillment)</h3>
     <ol>
         <li>Request a SKU ID from admin</li>
         <li>Admin sets price on each chain's contract via <code>setPrice()</code></li>
-        <li>Admin configures fulfillment via <code>setSkuConfig()</code></li>
-        <li>Add SKU config to <code>cross_chain_payment_config</code> table</li>
-        <li>Frontend calls <code>purchaseWithNative()</code> or <code>purchaseWithToken()</code></li>
-        <li>Backend cron handles reward delivery automatically</li>
+        <li>Admin configures as <code>BACKEND</code> mode via <code>setSkuConfig()</code></li>
+        <li>Do NOT add to <code>cross_chain_payment_config</code> (prevents centralized fulfillment)</li>
+        <li>Run your own scanner to watch for <code>PaymentReceived</code> events with your SKU ID</li>
+        <li>Handle delivery in your own backend</li>
+        <li>Payment data still tracked in <code>pg_payments_db</code> for revenue and referral calculations</li>
+    </ol>
+
+    <h3>For Stripe Integration</h3>
+    <ol>
+        <li>Create a Stripe Checkout Session with <code>metadata: { skuId, wallet }</code></li>
+        <li>Configure your Stripe webhook URL to: <code>https://api.account.pentagon.games/stripe/webhook</code></li>
+        <li>Provide your webhook secret to the platform team for multi-account configuration</li>
+        <li>Use <code>POST /stripe/payment_status</code> to poll fulfillment status from your frontend</li>
     </ol>
 
     <h3>Frontend Example (viem/wagmi)</h3>
