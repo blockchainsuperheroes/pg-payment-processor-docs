@@ -406,9 +406,62 @@ INSERT INTO cross_chain_payment_config
     <h2 id="api">5. API Endpoints</h2>
 
     <div class="card">
+        <h3>Infrastructure Note</h3>
+        <p>
+            Payment API endpoints currently live on <code>api.account.pentagon.games</code>, which is the
+            <a href="https://blockchainsuperheroes.github.io/pg-identity-docs/">Pentagon Identity API</a>
+            (login, user profiles, wallets, social auth, VIP). The "account" in the domain name covers both
+            meanings: user accounts (identity) and financial accounting (payments).
+        </p>
+        <p>
+            This is intentional for now. The payment endpoints (<code>/stripe/webhook</code>, <code>/stripe/payment_status</code>)
+            share the same nginx, SSL, and server infrastructure as the identity API on <strong>pg-identity</strong> (13.212.154.41).
+            The payment processing workers (on-chain scanner + NFT fulfillment + minter key) run on a separate
+            internal-only server <strong>pg-payment-workers</strong> (18.143.93.137) with no public HTTP ports.
+        </p>
+        <table>
+            <tr><th>Component</th><th>Server</th><th>Domain</th><th>Facing</th></tr>
+            <tr>
+                <td>Payment API (webhook, status)</td>
+                <td>pg-identity (13.212.154.41)</td>
+                <td><code>api.account.pentagon.games</code></td>
+                <td>3rd-party (Stripe, frontends)</td>
+            </tr>
+            <tr>
+                <td>Identity API (login, wallets, VIP)</td>
+                <td>pg-identity (13.212.154.41)</td>
+                <td><code>api.account.pentagon.games</code></td>
+                <td>3rd-party (frontends, SSO clients)</td>
+            </tr>
+            <tr>
+                <td>On-chain scanner</td>
+                <td>pg-payment-workers (18.143.93.137)</td>
+                <td>None (internal)</td>
+                <td>Internal only</td>
+            </tr>
+            <tr>
+                <td>NFT fulfillment + minter key</td>
+                <td>pg-payment-workers (18.143.93.137)</td>
+                <td>None (internal)</td>
+                <td>Internal only</td>
+            </tr>
+        </table>
+        <p style="color: var(--text-dim); font-size: 0.85rem;">
+            When payment volume warrants its own domain, the API endpoints will move to
+            <code>api.payment.pentagon.games</code> on a dedicated server. The workers server with the
+            minter key stays isolated either way.
+        </p>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-live">LIVE</span>
+        <p>Base URL: <code>https://api.account.pentagon.games</code> (shared with Identity API)</p>
+        <p>Future Base URL: <code>https://api.payment.pentagon.games</code> (when split)</p>
+    </div>
+
+    <div class="card">
         <span class="badge badge-planned">PLANNED</span>
-        <p>Base URL: <code>https://api.payment.pentagon.games</code></p>
-        <p>Authentication: App Key via <code>X-PG-App-Key</code> header</p>
+        <p>Authentication for future endpoints: App Key via <code>X-PG-App-Key</code> header</p>
     </div>
 
     <div class="card">
