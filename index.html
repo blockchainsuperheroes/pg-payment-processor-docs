@@ -134,7 +134,9 @@
             <li><a href="#contracts">Smart Contracts</a></li>
             <li><a href="#payment-flow">Payment Flow</a></li>
             <li><a href="#sku-config">SKU Configuration</a></li>
+            <li><a href="#auth">Authentication</a></li>
             <li><a href="#api">API Endpoints</a></li>
+            <li><a href="#explorer">Payment Explorer</a></li>
             <li><a href="#integration">Integration Guide</a></li>
             <li><a href="#referral">Referral &amp; Revenue</a></li>
         </ul>
@@ -402,8 +404,40 @@ INSERT INTO cross_chain_payment_config
   (sku_id, sku_name, item_type, item_name, amount, contract_chain_id, ...)
     </pre>
 
+    <!-- AUTH -->
+    <h2 id="auth">5. Authentication</h2>
+
+    <p>All internal API endpoints require an app key passed via the <code>X-PG-App-Key</code> header. The same keys issued for the <a href="https://blockchainsuperheroes.github.io/pg-nft-data-docs/">NFT Data API</a> work here. One key, multiple Pentagon services.</p>
+
+    <div class="card">
+        <h3>App Key Header</h3>
+        <pre>
+curl -H "X-PG-App-Key: pk_live_your_key" \
+  "https://api.account.pentagon.games/api/v1/payments?sku_id=9&status=completed"
+        </pre>
+    </div>
+
+    <h3>Rate Limits</h3>
+    <table>
+        <tr><th>Auth Level</th><th>Limit</th><th>Scope</th></tr>
+        <tr><td>No key (public)</td><td>Blocked</td><td>Internal endpoints require a key</td></tr>
+        <tr><td>App key (web)</td><td>60&ndash;100 req/min</td><td>Per key</td></tr>
+        <tr><td>App key (server)</td><td>100&ndash;500 req/min</td><td>Per key</td></tr>
+    </table>
+    <p style="color: var(--text-dim); font-size: 0.85rem;">Rate limits are configurable per app key. When exceeded, the API returns <code>429 Too Many Requests</code> with a <code>retry_after</code> field. The Stripe webhook endpoint does not require an app key (authenticated by Stripe signature instead).</p>
+
+    <h3>Access Scopes</h3>
+    <p>App keys can be issued with different access scopes:</p>
+    <table>
+        <tr><th>Scope</th><th>Access</th><th>Use Case</th></tr>
+        <tr><td><code>payments:read</code></td><td>Read own payments only (wallet-bound)</td><td>User-facing frontends, Payment Explorer (user view)</td></tr>
+        <tr><td><code>payments:read:all</code></td><td>Read all payments across all buyers</td><td>Admin dashboards, internal tools, Payment Explorer (admin view)</td></tr>
+        <tr><td><code>payments:write</code></td><td>Trigger retries, update status</td><td>Admin fulfillment tools</td></tr>
+    </table>
+    <p style="color: var(--text-dim); font-size: 0.85rem;">User-scoped keys (<code>payments:read</code>) can only query payments matching the wallet address bound to their key or authenticated session. Admin keys (<code>payments:read:all</code>) can query any buyer.</p>
+
     <!-- API -->
-    <h2 id="api">5. API Endpoints</h2>
+    <h2 id="api">6. API Endpoints</h2>
 
     <div class="card">
         <h3>Infrastructure Note</h3>
@@ -460,14 +494,15 @@ INSERT INTO cross_chain_payment_config
     </div>
 
     <div class="card">
-        <span class="badge badge-planned">PLANNED</span>
-        <p>Authentication for future endpoints: App Key via <code>X-PG-App-Key</code> header</p>
+        <span class="badge badge-live">REQUIRES APP KEY</span>
+        <p>All <code>/api/v1/payments/*</code> endpoints require a valid <code>X-PG-App-Key</code> header. Same keys as the <a href="https://blockchainsuperheroes.github.io/pg-nft-data-docs/">NFT Data API</a>.</p>
     </div>
 
     <div class="card">
         <span class="badge badge-get">GET</span>
         <span class="endpoint">/api/v1/payments</span>
-        <p>List all payments with optional filters.</p>
+        <span class="badge badge-live">LIVE</span>
+        <p>List payments with optional filters. Admin keys return all records. User keys return only payments matching their bound wallet.</p>
         <table>
             <tr><th>Param</th><th>Type</th><th>Description</th></tr>
             <tr><td><code>buyer</code></td><td>address</td><td>Filter by buyer wallet</td></tr>
@@ -508,8 +543,125 @@ INSERT INTO cross_chain_payment_config
 
     <div class="card">
         <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/v1/payments/{payment_id}</span>
+        <span class="badge badge-live">LIVE</span>
+        <p>Get full detail for a single payment including on-chain proof and delivery status.</p>
+        <pre>
+{
+  "payment": {
+    "id": 8412,
+    "tx_hash": "0x7fa2cf58a278b2df6d74...",
+    "chain_id": 3344,
+    "block_number": 3350142,
+    "buyer": "0xcfb0aee8f7445140d49b...",
+    "sku_id": 9,
+    "sku_name": "EtherFantasy Character",
+    "payment_method": "native",
+    "payment_token": "PC",
+    "amount": "250000000000000000",
+    "amount_usd": 0.25,
+    "purchase_status": "confirmed",
+    "created_at": "2026-03-30T14:22:11+00:00"
+  },
+  "delivery": {
+    "status": "completed",
+    "reward_tx_hash": "0x99d815d2af3e7b82...",
+    "reward_chain_id": 3344,
+    "token_id": 4201,
+    "contract": "0x8F83c6122Dd4d275B53a...",
+    "delivered_at": "2026-03-30T14:27:45+00:00"
+  },
+  "on_chain_proof": {
+    "payment_event_found": true,
+    "payment_block": 3350142,
+    "delivery_verified": true,
+    "current_nft_owner": "0xcfb0aee8f7445140d49b..."
+  }
+}
+        </pre>
+        <h3>Delivery Status Values</h3>
+        <table>
+            <tr><th>Status</th><th>Meaning</th></tr>
+            <tr><td><code>pending</code></td><td>Payment confirmed, awaiting fulfillment</td></tr>
+            <tr><td><code>processing</code></td><td>Mint transaction submitted, waiting for confirmation</td></tr>
+            <tr><td><code>completed</code></td><td>NFT minted and delivered. <code>reward_tx_hash</code> + <code>token_id</code> present.</td></tr>
+            <tr><td><code>failed</code></td><td>Fulfillment failed (contract error, gas, minter overloaded)</td></tr>
+            <tr><td><code>stuck</code></td><td>Processing started but never completed (server crash, timeout)</td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
         <span class="endpoint">/api/v1/payments/by-buyer/{address}</span>
-        <p>All payments for a specific wallet. Used by VIP referral system.</p>
+        <span class="badge badge-live">LIVE</span>
+        <p>All payments for a specific wallet with delivery status for each. User keys can only query their own bound wallet. Admin keys can query any address.</p>
+        <pre>
+{
+  "buyer": "0xcfb0aee8f7445140d49bf589e30db43fd2ac05e9",
+  "total": 50,
+  "delivered": 44,
+  "pending": 0,
+  "failed": 6,
+  "page": 1,
+  "payments": [
+    {
+      "id": 8412,
+      "sku_id": 9,
+      "tx_hash": "0x7fa2cf58...",
+      "chain_id": 3344,
+      "amount_usd": 0.25,
+      "delivery_status": "completed",
+      "token_id": 4201,
+      "created_at": "2026-03-30T14:22:11+00:00"
+    }
+  ]
+}
+        </pre>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/v1/payments/by-collection/{contract}</span>
+        <span class="badge badge-live">LIVE</span>
+        <p>All payments for a specific NFT collection (by contract address). Returns payment + delivery records for every purchase targeting this collection. Admin keys only.</p>
+        <table>
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>contract</code></td><td>address (path)</td><td>NFT contract address</td></tr>
+            <tr><td><code>status</code></td><td>string (query)</td><td>Filter: pending | completed | failed | stuck</td></tr>
+            <tr><td><code>from</code></td><td>date (query)</td><td>Start date (YYYY-MM-DD)</td></tr>
+            <tr><td><code>to</code></td><td>date (query)</td><td>End date (YYYY-MM-DD)</td></tr>
+            <tr><td><code>page</code></td><td>int (query)</td><td>Page number (default 1)</td></tr>
+            <tr><td><code>limit</code></td><td>int (query)</td><td>Per page (default 50, max 200)</td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/v1/payments/stats</span>
+        <span class="badge badge-live">LIVE</span>
+        <p>Aggregate payment and delivery statistics. Admin keys only.</p>
+        <pre>
+{
+  "total_payments": 12228,
+  "by_status": {
+    "completed": 6440,
+    "failed": 2571,
+    "stuck": 424,
+    "pending": 4
+  },
+  "by_sku": {
+    "9": { "total": 12204, "completed": 6440, "failed": 2571, "stuck": 424 },
+    "2": { "total": 1, "completed": 1 }
+  },
+  "on_chain_audit": {
+    "last_run": "2026-05-24T23:50:00Z",
+    "payments_on_chain": 12228,
+    "nfts_minted_on_chain": 6536,
+    "deficit": 5682,
+    "discrepancies": 12
+  }
+}
+        </pre>
     </div>
 
     <div class="card">
@@ -613,8 +765,111 @@ INSERT INTO cross_chain_payment_config
         </table>
     </div>
 
+    <!-- PAYMENT EXPLORER -->
+    <h2 id="explorer">7. Payment Explorer</h2>
+
+    <p>A web-based payment lookup tool for buyers and admins. Gated by Pentagon login (same auth as <a href="https://nftmining.com">nftmining.com</a>). No public access, no crawling.</p>
+
+    <div class="card">
+        <h3>URL</h3>
+        <p><code>https://payment.pentagon.games</code> <span class="badge badge-planned">PLANNED</span></p>
+        <p>Alternative: <code>https://pentagon.games/payments</code> (if hosted as a route on the main site)</p>
+    </div>
+
+    <h3>Access Tiers</h3>
+    <table>
+        <tr><th>Role</th><th>Access</th><th>Auth</th></tr>
+        <tr>
+            <td><strong>User (payer)</strong></td>
+            <td>View own payments and delivery status only. Filtered by connected wallet.</td>
+            <td>Pentagon login (wallet connect or social login)</td>
+        </tr>
+        <tr>
+            <td><strong>Admin</strong></td>
+            <td>View all payments, all buyers, all SKUs. Export, retry failed, bulk actions.</td>
+            <td>Pentagon login + admin whitelist (initially: <code>nftprof</code>)</td>
+        </tr>
+    </table>
+
+    <h3>User View</h3>
+    <p>After logging in, the user sees all payments from wallets linked to their Pentagon account:</p>
+    <div class="card">
+        <p><strong>My Payments</strong></p>
+        <table>
+            <tr><th>Payment ID</th><th>Date</th><th>SKU</th><th>Amount</th><th>Delivery</th><th>TX</th></tr>
+            <tr>
+                <td><code>#8412</code></td>
+                <td>Mar 30, 2026</td>
+                <td>EtherFantasy Character</td>
+                <td>0.25 PC</td>
+                <td><span style="color: var(--green);">✅ Delivered</span></td>
+                <td><a href="#">View</a></td>
+            </tr>
+            <tr>
+                <td><code>#8413</code></td>
+                <td>Mar 30, 2026</td>
+                <td>EtherFantasy Character</td>
+                <td>0.25 PC</td>
+                <td><span style="color: var(--red);">❌ Failed</span></td>
+                <td><a href="#">View</a></td>
+            </tr>
+        </table>
+    </div>
+    <p>Clicking a payment opens the detail view showing:</p>
+    <ul>
+        <li>Payment transaction hash + link to block explorer</li>
+        <li>Delivery status with timeline (confirmed → processing → delivered/failed)</li>
+        <li>If delivered: NFT token ID, mint TX hash, current owner</li>
+        <li>If failed: failure reason, whether retry is pending</li>
+    </ul>
+
+    <h3>Admin View</h3>
+    <p>Admins see everything the user sees, plus:</p>
+    <ul>
+        <li><strong>Search by:</strong> payment ID, TX hash, buyer wallet, SKU, status, date range</li>
+        <li><strong>Bulk filters:</strong> "Show all failed for SKU 9", "Show stuck processing", "Show undelivered"</li>
+        <li><strong>Stats dashboard:</strong> Total payments, delivery rate, failure rate, on-chain audit discrepancies</li>
+        <li><strong>Export:</strong> CSV/JSON export of filtered results</li>
+        <li><strong>On-chain verification column:</strong> Each row shows whether the payment TX exists on-chain and whether the NFT mint TX was confirmed</li>
+    </ul>
+
+    <h3>On-Chain Verification</h3>
+    <p>The explorer cross-references DB records against on-chain truth, similar to the <a href="https://blockchainsuperheroes.github.io/pg-nft-data-docs/">NFT Data API</a>'s four-layer sync engine:</p>
+    <div class="flow-diagram">
+Layer 1: Payment Event Verification
+  └─ Confirm PaymentReceived event exists on-chain for each DB record
+  └─ Flag: DB record with no matching on-chain event = suspicious
+
+Layer 2: Delivery Verification
+  └─ For "completed" records: confirm mint TX exists on-chain
+  └─ For "failed"/"stuck": confirm no mint was actually delivered
+  └─ Flag: DB says completed but no on-chain mint = discrepancy
+
+Layer 3: Deficit Detection
+  └─ Cross-reference: total on-chain payments vs total on-chain mints per buyer
+  └─ Report: X buyers paid but never received, Y total NFTs owed
+    </div>
+
+    <h3>Anti-Crawl Protection</h3>
+    <ul>
+        <li>No public access. All pages require Pentagon login session.</li>
+        <li>User view is wallet-scoped. Cannot enumerate other users' payments.</li>
+        <li>Admin view requires whitelist membership (server-side check).</li>
+        <li>API endpoints behind app key + rate limiting. No unauthenticated access.</li>
+        <li>No SEO indexing (<code>robots.txt</code> + <code>noindex</code> meta tags).</li>
+    </ul>
+
+    <h3>Tech Stack</h3>
+    <table>
+        <tr><th>Component</th><th>Choice</th><th>Reason</th></tr>
+        <tr><td>Frontend</td><td>Next.js (React)</td><td>Same stack as pentagon.games, nftmining.com</td></tr>
+        <tr><td>Auth</td><td>Pentagon Identity API</td><td>Same SSO as nftmining.com, wallet-linked sessions</td></tr>
+        <tr><td>Data</td><td>Payment API (<code>/api/v1/payments/*</code>)</td><td>All data served through the authenticated API, not direct DB</td></tr>
+        <tr><td>Hosting</td><td>pg-fe (18.139.44.212) or dedicated</td><td>Same infra pattern as other Pentagon frontends</td></tr>
+    </table>
+
     <!-- INTEGRATION -->
-    <h2 id="integration">6. Integration Guide</h2>
+    <h2 id="integration">8. Integration Guide</h2>
 
     <h3>For New Products (Centralized Fulfillment)</h3>
     <ol>
@@ -680,7 +935,7 @@ await writeContract({
     </pre>
 
     <!-- REFERRAL -->
-    <h2 id="referral">7. Referral &amp; Revenue</h2>
+    <h2 id="referral">9. Referral &amp; Revenue</h2>
 
     <h3>VIP Referral Integration</h3>
     <p>
