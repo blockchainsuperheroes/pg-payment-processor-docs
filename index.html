@@ -545,7 +545,7 @@ curl -H "X-PG-App-Key: pk_live_your_key" \
         <span class="badge badge-get">GET</span>
         <span class="endpoint">/api/v1/payments/{payment_id}</span>
         <span class="badge badge-live">LIVE</span>
-        <p>Get full detail for a single payment including on-chain proof and delivery status.</p>
+        <p>Get full detail for a single payment including buyer identity, on-chain proof, and delivery status. The <code>buyer_identity</code> block is resolved from the Pentagon Identity system (admin keys only; user keys see their own identity only).</p>
         <pre>
 {
   "payment": {
@@ -563,6 +563,25 @@ curl -H "X-PG-App-Key: pk_live_your_key" \
     "purchase_status": "confirmed",
     "created_at": "2026-03-30T14:22:11+00:00"
   },
+  "buyer_identity": {
+    "pg_user_id": 41892,
+    "username": "cryptoking",
+    "pns_name": "king",
+    "email": "king@example.com",
+    "wallets": [
+      "0xcfb0aee8f7445140d49bf589e30db43fd2ac05e9",
+      "0xab12...7890"
+    ],
+    "social": {
+      "discord": { "id": "123456789", "username": "cryptoking#1234" },
+      "twitter": { "handle": "@cryptoking" },
+      "telegram": { "id": "987654321", "username": "cryptoking" }
+    },
+    "vip_tier": "VIP2",
+    "registered_at": "2025-06-12T08:30:00+00:00",
+    "last_login": "2026-05-20T14:15:22+00:00",
+    "resolution": "mm_address"
+  },
   "delivery": {
     "status": "completed",
     "reward_tx_hash": "0x99d815d2af3e7b82...",
@@ -579,6 +598,27 @@ curl -H "X-PG-App-Key: pk_live_your_key" \
   }
 }
         </pre>
+        <h3>Buyer Identity Resolution</h3>
+        <p>The <code>buyer_identity</code> block triangulates the on-chain wallet address against the Pentagon Identity database to resolve the full user profile. Resolution checks three sources in order:</p>
+        <table>
+            <tr><th>Source</th><th>DB Field</th><th>Match</th></tr>
+            <tr><td>Primary EVM wallet</td><td><code>user.mm_address</code></td><td>Case-insensitive match against buyer address</td></tr>
+            <tr><td>Additional wallets</td><td><code>user_wallet</code> table</td><td>Secondary bound wallets (MetaMask, Rabby, etc.)</td></tr>
+            <tr><td>External wallets</td><td><code>user_external_wallets</code> table</td><td>MultiversX, Tron, TON, Algorand addresses</td></tr>
+        </table>
+        <p style="color: var(--text-dim); font-size: 0.85rem;">The <code>resolution</code> field indicates which source matched: <code>mm_address</code> (primary), <code>user_wallet</code> (secondary), or <code>external_wallet</code>. If the wallet is not linked to any PG account, <code>buyer_identity</code> returns <code>null</code> with <code>resolution: "unregistered"</code>.</p>
+
+        <h3>Social Contact Fields (Admin Only)</h3>
+        <p>The <code>social</code> block includes all connected accounts from the Pentagon Identity system. Use these to contact buyers for support:</p>
+        <table>
+            <tr><th>Platform</th><th>Fields</th><th>Contact Method</th></tr>
+            <tr><td>Email</td><td><code>email</code></td><td>Direct email (always present if registered)</td></tr>
+            <tr><td>Discord</td><td><code>social.discord.id</code>, <code>social.discord.username</code></td><td>DM via bot or manual</td></tr>
+            <tr><td>Twitter</td><td><code>social.twitter.handle</code></td><td>DM or @mention</td></tr>
+            <tr><td>Telegram</td><td><code>social.telegram.id</code>, <code>social.telegram.username</code></td><td>TG DM</td></tr>
+        </table>
+        <p style="color: var(--text-dim); font-size: 0.85rem;">Social fields are only populated if the user connected that platform to their PG account. Admin keys see all fields. User keys see only their own profile (no other buyers' contact info).</p>
+
         <h3>Delivery Status Values</h3>
         <table>
             <tr><th>Status</th><th>Meaning</th></tr>
@@ -594,10 +634,22 @@ curl -H "X-PG-App-Key: pk_live_your_key" \
         <span class="badge badge-get">GET</span>
         <span class="endpoint">/api/v1/payments/by-buyer/{address}</span>
         <span class="badge badge-live">LIVE</span>
-        <p>All payments for a specific wallet with delivery status for each. User keys can only query their own bound wallet. Admin keys can query any address.</p>
+        <p>All payments for a specific wallet with delivery status for each, plus the resolved Pentagon user identity. User keys can only query their own bound wallet. Admin keys can query any address.</p>
         <pre>
 {
   "buyer": "0xcfb0aee8f7445140d49bf589e30db43fd2ac05e9",
+  "buyer_identity": {
+    "pg_user_id": 41892,
+    "username": "cryptoking",
+    "pns_name": "king",
+    "email": "king@example.com",
+    "social": {
+      "discord": { "id": "123456789", "username": "cryptoking#1234" },
+      "twitter": { "handle": "@cryptoking" },
+      "telegram": { "id": "987654321", "username": "cryptoking" }
+    },
+    "vip_tier": "VIP2"
+  },
   "total": 50,
   "delivered": 44,
   "pending": 0,
@@ -662,6 +714,55 @@ curl -H "X-PG-App-Key: pk_live_your_key" \
   }
 }
         </pre>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-post">POST</span>
+        <span class="endpoint">/api/v1/payments/resolve-buyers</span>
+        <span class="badge badge-live">LIVE</span>
+        <p>Bulk resolve wallet addresses to Pentagon user identities. Admin keys only. Max 200 addresses per request. Used by the Payment Explorer for batch identity resolution.</p>
+        <pre>
+// Request
+POST /api/v1/payments/resolve-buyers
+X-PG-App-Key: pk_live_admin_key
+
+{
+  "addresses": [
+    "0xcfb0aee8f7445140d49bf589e30db43fd2ac05e9",
+    "0x5133657725225202a8817b8cab14aa77fd7758ef",
+    "0xea3339a9aac6e3c7efecd9e9c9993f3a0163d7be"
+  ]
+}
+
+// Response
+{
+  "resolved": 2,
+  "unregistered": 1,
+  "results": {
+    "0xcfb0aee8f7445140d49bf589e30db43fd2ac05e9": {
+      "pg_user_id": 41892,
+      "username": "cryptoking",
+      "pns_name": "king",
+      "email": "king@example.com",
+      "social": {
+        "discord": { "id": "123456789", "username": "cryptoking#1234" },
+        "telegram": { "username": "cryptoking" }
+      },
+      "resolution": "mm_address"
+    },
+    "0xea3339a9aac6e3c7efecd9e9c9993f3a0163d7be": {
+      "pg_user_id": 55210,
+      "username": "germax",
+      "pns_name": null,
+      "email": "germax@proton.me",
+      "social": {},
+      "resolution": "user_wallet"
+    },
+    "0x5133657725225202a8817b8cab14aa77fd7758ef": null
+  }
+}
+        </pre>
+        <p style="color: var(--text-dim); font-size: 0.85rem;">Addresses that don't match any PG account return <code>null</code>. The Explorer uses this to populate identity columns in the admin table and flag unregistered wallets for follow-up.</p>
     </div>
 
     <div class="card">
@@ -824,14 +925,67 @@ curl -H "X-PG-App-Key: pk_live_your_key" \
     </ul>
 
     <h3>Admin View</h3>
-    <p>Admins see everything the user sees, plus:</p>
+    <p>Admins see everything the user sees, plus full buyer identity resolution and contact info:</p>
+    <div class="card">
+        <p><strong>Admin Payment Explorer</strong></p>
+        <table>
+            <tr><th>ID</th><th>Date</th><th>Buyer</th><th>PG User</th><th>Contact</th><th>SKU</th><th>Delivery</th><th>On-Chain</th></tr>
+            <tr>
+                <td><code>#8412</code></td>
+                <td>Mar 30</td>
+                <td><code>0xcfb0...05e9</code></td>
+                <td>cryptoking (ID: 41892)</td>
+                <td>📧 💬 🐦</td>
+                <td>SKU 9</td>
+                <td><span style="color: var(--green);">✅</span></td>
+                <td><span style="color: var(--green);">✅</span></td>
+            </tr>
+            <tr>
+                <td><code>#9001</code></td>
+                <td>Mar 30</td>
+                <td><code>0x5133...8ef</code></td>
+                <td><span style="color: var(--text-dim);">Unregistered</span></td>
+                <td>—</td>
+                <td>SKU 9</td>
+                <td><span style="color: var(--red);">❌ Failed</span></td>
+                <td><span style="color: var(--green);">✅</span></td>
+            </tr>
+        </table>
+    </div>
+
+    <h3>Admin Capabilities</h3>
     <ul>
-        <li><strong>Search by:</strong> payment ID, TX hash, buyer wallet, SKU, status, date range</li>
-        <li><strong>Bulk filters:</strong> "Show all failed for SKU 9", "Show stuck processing", "Show undelivered"</li>
-        <li><strong>Stats dashboard:</strong> Total payments, delivery rate, failure rate, on-chain audit discrepancies</li>
-        <li><strong>Export:</strong> CSV/JSON export of filtered results</li>
+        <li><strong>Search by:</strong> payment ID, TX hash, buyer wallet, PG username, PNS name, email, SKU, status, date range</li>
+        <li><strong>Bulk filters:</strong> "Show all failed for SKU 9", "Show stuck processing", "Show undelivered", "Show unregistered wallets"</li>
+        <li><strong>Identity columns:</strong> PG user ID, username, PNS name, email, linked socials (Discord/Twitter/Telegram)</li>
+        <li><strong>Contact icons:</strong> Clickable icons to open email compose, Discord DM, Twitter DM, Telegram chat</li>
+        <li><strong>Stats dashboard:</strong> Total payments, delivery rate, failure rate, on-chain audit discrepancies, registered vs unregistered breakdown</li>
+        <li><strong>Export:</strong> CSV/JSON export with full identity data (for bulk support outreach)</li>
         <li><strong>On-chain verification column:</strong> Each row shows whether the payment TX exists on-chain and whether the NFT mint TX was confirmed</li>
     </ul>
+
+    <h3>Buyer Identity Triangulation</h3>
+    <p>For every payment, the Explorer resolves the buyer wallet to a Pentagon user account by querying the Identity API. This gives admins a complete picture of who paid and how to reach them:</p>
+    <div class="flow-diagram">
+On-chain buyer wallet: 0xcfb0aee8f7445140d49bf589e30db43fd2ac05e9
+        │
+        ├─ Check user.mm_address (primary EVM wallet)
+        ├─ Check user_wallet table (secondary bound wallets)
+        └─ Check user_external_wallets (MultiversX, Tron, TON, Algo)
+        │
+        ▼
+   PG User ID: 41892
+   Username:   cryptoking
+   PNS Name:   king
+   Email:      king@example.com
+   Discord:    cryptoking#1234 (ID: 123456789)
+   Twitter:    @cryptoking
+   Telegram:   @cryptoking (ID: 987654321)
+   VIP Tier:   VIP2
+   Registered: 2025-06-12
+   Last Login: 2026-05-20
+    </div>
+    <p>If the wallet is not linked to any Pentagon account, the identity block shows <code>"Unregistered"</code>. The admin can still see the wallet address and on-chain payment proof, but has no contact info. For bulk outreach, export the unregistered wallet list and consider on-chain messaging or explorer-based contact.</p>
 
     <h3>On-Chain Verification</h3>
     <p>The explorer cross-references DB records against on-chain truth, similar to the <a href="https://blockchainsuperheroes.github.io/pg-nft-data-docs/">NFT Data API</a>'s four-layer sync engine:</p>
