@@ -139,6 +139,7 @@
             <li><a href="#explorer">Payment Explorer</a></li>
             <li><a href="#integration">Integration Guide</a></li>
             <li><a href="#referral">Referral &amp; Revenue</a></li>
+            <li><a href="#campaigns">Campaign Rewards &amp; Offers</a></li>
         </ul>
     </div>
 
@@ -873,8 +874,7 @@ X-PG-App-Key: pk_live_admin_key
 
     <div class="card">
         <h3>URL</h3>
-        <p><code>https://payment.pentagon.games</code> <span class="badge badge-planned">PLANNED</span></p>
-        <p>Alternative: <code>https://pentagon.games/payments</code> (if hosted as a route on the main site)</p>
+        <p><code>https://payments.pentagon.games</code> <span class="badge badge-live">LIVE</span></p>
     </div>
 
     <h3>Access Tiers</h3>
@@ -1132,6 +1132,248 @@ await writeContract({
         </table>
         <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 0.5rem;">Last updated: 2026-05-02</p>
     </div>
+
+    <!-- CAMPAIGN REWARDS -->
+    <h2 id="campaigns">10. Campaign Rewards &amp; Offers</h2>
+
+    <p>
+        The Campaign Rewards system incentivizes user activity by compensating purchases with on-chain token rewards.
+        Think of it as an on-ramp: users buy NPC credits (fiat via Stripe), and the system rewards them with
+        real tokens on Pentagon Chain and Ethereum mainnet. Campaigns are time-limited, one-per-user, and
+        publicly visible on the <strong>Offers</strong> tab at
+        <a href="https://payments.pentagon.games">payments.pentagon.games</a>.
+    </p>
+
+    <div class="card">
+        <h3>Key Concept: NPC = PC</h3>
+        <p>
+            NPC PG Points are PC tokens held in the user's AA (Account Abstraction) internal wallet.
+            <strong>1000 NPC = 1 PC.</strong> When a user purchases NPC credits via Stripe on
+            <a href="https://pentagon.games/account">pentagon.games/account</a>, they're buying PC
+            into their platform wallet.
+        </p>
+    </div>
+
+    <h3>How Campaigns Work</h3>
+    <div class="flow-diagram">
+User buys 1000 NPC credits on pentagon.games/account (Stripe, $35)
+    │
+    ▼
+pentagton-login-backend detects threshold met
+    │
+    ▼
+POST /api/campaigns/qualify → cross-chain-payment service
+    │
+    ├─ Check: has this user already claimed this campaign? (DB unique constraint)
+    ├─ If yes → 409 Conflict, skip
+    ├─ If no → create campaign_claim (status: qualified)
+    │
+    ▼
+campaign_reward_processor picks up (every 5 min)
+    │
+    ├─ Reward 1: Send 1 PC on Pentagon Chain (3344) via send_gas()
+    ├─ Reward 2: Call CampaignReward.distribute(recipient) on ETH mainnet
+    │            (contract enforces 1-per-address on-chain)
+    │
+    ▼
+All rewards delivered → claim.status = completed
+    │
+    ▼
+User sees TX hashes + explorer links on payments.pentagon.games/offers
+    </div>
+
+    <h3>Campaign Reward Contract (ETH Mainnet)</h3>
+    <p>
+        Each campaign that distributes tokens on ETH mainnet gets a dedicated smart contract.
+        The contract enforces the 1-per-address rule on-chain, preventing double claims even if
+        the backend has a bug. After the campaign ends, remaining funds can only be withdrawn
+        by the designated recovery address.
+    </p>
+
+    <div class="card">
+        <h3>CampaignReward.sol</h3>
+        <table>
+            <tr><td>Owner</td><td><code>0xC486efE8F196Ed9956b54965988D3307e08cBde0</code> (Agent deployer)</td></tr>
+            <tr><td>Recovery Address</td><td><code>0xB2e3e82a95f5c4c47E30A5b420Ac4f99d32EF61f</code> (Idon/dev)</td></tr>
+            <tr><td>Chain</td><td>Ethereum Mainnet (1)</td></tr>
+            <tr><td>1-per-address</td><td><code>mapping(address =&gt; bool) hasClaimed</code></td></tr>
+        </table>
+    </div>
+
+    <h3>Contract Interface</h3>
+    <pre>
+// Owner-only: send reward to qualified user (1 per address enforced)
+function distribute(address recipient) external onlyOwner;
+
+// Recovery: withdraw remaining funds after campaign ends
+// Only callable by recoveryAddress after campaignEnd timestamp
+function recoverFunds() external;
+
+// Pause/unpause distributions
+function setPaused(bool _paused) external onlyOwner;
+
+// View functions
+function hasClaimed(address user) external view returns (bool);
+function remainingFunds() external view returns (uint256);
+function totalClaimed() external view returns (uint256);
+function campaignEnd() external view returns (uint256);
+function rewardAmount() external view returns (uint256);
+
+// Events
+event Claimed(address indexed recipient, uint256 amount, uint256 timestamp);
+event FundsRecovered(address indexed to, uint256 amount);
+event CampaignPaused(bool paused);
+    </pre>
+
+    <h3>Database Schema (Campaign Tables)</h3>
+    <p>Four new tables in <code>pg_payments_db</code> alongside the existing payment tables:</p>
+
+    <table>
+        <tr><th>Table</th><th>Purpose</th><th>Key Fields</th></tr>
+        <tr>
+            <td><code>campaign</code></td>
+            <td>Campaign definitions (admin/agent-created)</td>
+            <td>slug, title, trigger_type, trigger_threshold, starts_at, ends_at, max_claims (per user), is_active</td>
+        </tr>
+        <tr>
+            <td><code>campaign_reward</code></td>
+            <td>What each campaign pays out (supports multiple rewards per campaign)</td>
+            <td>campaign_id, reward_type (native_token/erc20/nft), chain_id, amount, token_symbol, is_bonus, contract_address</td>
+        </tr>
+        <tr>
+            <td><code>campaign_claim</code></td>
+            <td>Who claimed what (1-per-user enforced via unique constraint)</td>
+            <td>campaign_id, user_id, wallet_address, status, qualification_proof (JSONB), <strong>UNIQUE(campaign_id, user_id)</strong></td>
+        </tr>
+        <tr>
+            <td><code>campaign_claim_reward</code></td>
+            <td>Individual TX tracking per reward delivery</td>
+            <td>claim_id, campaign_reward_id, chain_id, amount, to_address, tx_hash, status</td>
+        </tr>
+    </table>
+
+    <h3>API Endpoints (Campaign)</h3>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/campaigns</span>
+        <span class="badge badge-live">PUBLIC</span>
+        <p>List active campaigns. No auth required. Powers the Offers tab on payments.pentagon.games.</p>
+        <pre>
+[
+  {
+    "slug": "npc-1000-pc-bonus-june2026",
+    "title": "Earn 1000 NPC Points → Get PC on Ethereum",
+    "description": "Purchase 1000 NPC PG Points and receive...",
+    "image_url": "https://pentagon.games/assets/campaigns/npc-pc-bonus.png",
+    "starts_at": "2026-06-01T00:00:00Z",
+    "ends_at": "2026-06-30T23:59:59Z",
+    "is_featured": true,
+    "rewards": [
+      { "label": "1 PC on Pentagon Chain", "chain_id": 3344, "amount": 1.0, "is_bonus": false },
+      { "label": "1 PC on Ethereum", "chain_id": 1, "amount": 1.0, "is_bonus": true }
+    ],
+    "trigger": { "type": "npc_credit", "threshold": 1000 },
+    "total_claims": 42
+  }
+]
+        </pre>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-get">GET</span>
+        <span class="endpoint">/api/campaigns/{slug}/status?user_id={user_id}</span>
+        <span class="badge badge-live">AUTH</span>
+        <p>Check a user's eligibility and reward status for a specific campaign.</p>
+        <pre>
+{
+  "eligible": true,
+  "claimed": true,
+  "claim": {
+    "status": "completed",
+    "qualified_at": "2026-06-05T14:30:00Z",
+    "rewards": [
+      {
+        "label": "1 PC on Pentagon Chain",
+        "chain_id": 3344,
+        "amount": 1.0,
+        "status": "success",
+        "tx_hash": "0xabc...",
+        "explorer_url": "https://explorer.pentagon.games/tx/0xabc..."
+      },
+      {
+        "label": "1 PC on Ethereum",
+        "chain_id": 1,
+        "amount": 1.0,
+        "status": "success",
+        "tx_hash": "0xdef...",
+        "explorer_url": "https://etherscan.io/tx/0xdef..."
+      }
+    ]
+  }
+}
+        </pre>
+    </div>
+
+    <div class="card">
+        <span class="badge badge-post">POST</span>
+        <span class="endpoint">/api/campaigns/qualify</span>
+        <span class="badge badge-live">INTERNAL</span>
+        <p>Called when a user meets a campaign threshold. Creates a claim entry. Returns 409 if already claimed.</p>
+        <pre>
+// Request
+{
+  "campaign_slug": "npc-1000-pc-bonus-june2026",
+  "user_id": "user179298482",
+  "wallet_address": "0x1234...",
+  "proof": { "npc_points": 1000, "stripe_pi": "pi_xxx" }
+}
+
+// Success: 201 Created
+{ "claim_id": 42, "status": "qualified" }
+
+// Already claimed: 409 Conflict
+{ "error": "already_claimed", "claimed_at": "2026-06-05T14:30:00Z" }
+        </pre>
+    </div>
+
+    <h3>Offers Tab (payments.pentagon.games)</h3>
+    <p>
+        The <strong>Offers</strong> tab on <a href="https://payments.pentagon.games">payments.pentagon.games</a>
+        shows all active and past campaigns. Users can:
+    </p>
+    <ul>
+        <li>Browse active offers with reward details and eligible periods</li>
+        <li>Click through to <a href="https://pentagon.games/account">pentagon.games/account</a> to buy NPC credits</li>
+        <li>Check their claim status and view TX hashes with explorer links</li>
+        <li>See past campaigns (greyed out with "Ended" badge)</li>
+    </ul>
+
+    <h3>First Campaign: NPC 1000 → PC Bonus (June 2026)</h3>
+    <div class="card">
+        <table>
+            <tr><td>Campaign</td><td><strong>Earn 1000 NPC Points → Get PC on Ethereum</strong></td></tr>
+            <tr><td>Trigger</td><td>Acquire 1000 NPC PG Points (= 1 PC in AA wallet)</td></tr>
+            <tr><td>Reward 1</td><td>1 PC on Pentagon Chain (3344)</td></tr>
+            <tr><td>Reward 2 (Bonus)</td><td>1 PC on Ethereum mainnet (via CampaignReward contract)</td></tr>
+            <tr><td>Limit</td><td><strong>1 per user</strong> (enforced in DB + on-chain)</td></tr>
+            <tr><td>Period</td><td>June 1 &ndash; June 30, 2026</td></tr>
+            <tr><td>Post-campaign</td><td>Unclaimed ETH funds recoverable only by <code>0xB2e3...EF61f</code></td></tr>
+        </table>
+    </div>
+
+    <h3>Creating New Campaigns</h3>
+    <p>
+        Campaigns are created by the agent directly (no admin panel). After the first campaign,
+        an agent guide will be written for standardized campaign creation. The process:
+    </p>
+    <ol>
+        <li>Define campaign parameters (trigger, rewards, period, limits)</li>
+        <li>If ETH mainnet rewards: deploy a new CampaignReward contract with appropriate parameters</li>
+        <li>Fund the contract with the reward token amount</li>
+        <li>Insert campaign + campaign_reward rows into pg_payments_db</li>
+        <li>Campaign appears on Offers tab automatically</li>
+    </ol>
 
     <footer>
         Pentagon Games &mdash; Payment Processor Documentation<br>
