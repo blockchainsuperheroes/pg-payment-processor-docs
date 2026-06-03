@@ -140,6 +140,8 @@
             <li><a href="#integration">Integration Guide</a></li>
             <li><a href="#referral">Referral &amp; Revenue</a></li>
             <li><a href="#campaigns">Campaign Rewards &amp; Offers</a></li>
+            <li><a href="#spend-capture">Spend Capture for Custom Integrations</a></li>
+            <li><a href="#user-agent">User AI Agent Access (mydata)</a></li>
         </ul>
     </div>
 
@@ -151,6 +153,43 @@
         (EtherFantasy, Gunnies, Setsuko, etc.) use the same contracts and backend for payment
         processing, revenue tracking, and reward fulfillment.
     </p>
+
+    <h3>Purpose: Why This Document Exists</h3>
+    <div class="card">
+        <p>
+            Beyond "how to take a payment," this stack exists so that <strong>every dollar (or PC) a user
+            spends anywhere in the Pentagon ecosystem lands in one place they can see, query, and prove.</strong>
+            Think of it as a block explorer scoped to a single user's spending across all of Pentagon Games:
+            NFT mints, mining fees, NPC credits, Stripe purchases, campaign claims, cross-chain bridges, everything.
+        </p>
+        <p>
+            That single source of truth powers two distinct audiences, each addressed by its own section below:
+        </p>
+        <ul>
+            <li>
+                <strong>Project / service builders (and their agents)</strong> &mdash; if you run a contract or service
+                that takes money from users, you need to feed payment events into this stack so the user's spending
+                history is complete. See
+                <a href="#spend-capture">Spend Capture for Custom Integrations</a>. The NFT mining contract is the
+                canonical example: it has its own fee logic and pools, doesn't use Stripe or the standard payment
+                processor, yet its spend events still need to be captured so the user has one place to track and
+                prove what they paid.
+            </li>
+            <li>
+                <strong>The user's own AI agent</strong> &mdash; a Pentagon AI agent acting on behalf of a logged-in
+                user can read that user's full payment history (alongside profile, NFTs, and internal wallet) to
+                answer questions like "I made this spend, what happened?" See
+                <a href="#user-agent">User AI Agent Access (mydata)</a>.
+            </li>
+        </ul>
+        <p style="color: var(--text-dim); font-size: 0.9rem;">
+            <strong>The long-term goal:</strong> monitor <em>all</em> of a user's on-chain contract spending on Pentagon Chain
+            and recognize what each spend was for. Anything we <em>can't</em> recognize is a signal: it's a service that
+            hasn't been wired into the payment stack yet. When that happens, point the owning team (or their session
+            agent) at the <a href="#spend-capture">Spend Capture</a> section and ask them to describe their payment
+            design pattern so the tracker can incorporate it.
+        </p>
+    </div>
 
     <h3>Supported Payment Methods</h3>
     <table>
@@ -1374,6 +1413,219 @@ event CampaignPaused(bool paused);
         <li>Insert campaign + campaign_reward rows into pg_payments_db</li>
         <li>Campaign appears on Offers tab automatically</li>
     </ol>
+
+    <!-- SPEND CAPTURE FOR CUSTOM INTEGRATIONS -->
+    <h2 id="spend-capture">11. Spend Capture for Custom Integrations</h2>
+
+    <p>
+        This section is written to be handed directly to <strong>another agent or developer</strong> who runs a
+        service that takes money from users but does <em>not</em> go through the standard payment processor or Stripe.
+        The goal is simple: get your spend events into <code>pg_payments_db</code> so the user's unified spending
+        history (and their AI agent) can see and prove every payment they made.
+    </p>
+
+    <div class="card">
+        <p>
+            <strong>Why your payment data needs to be provided.</strong> Pentagon is building a single per-user
+            spending ledger &mdash; effectively a block explorer of a user's spending across the whole ecosystem.
+            If your service collects fees and we don't capture them, the user sees a gap: they paid, but their
+            history doesn't show it, and their agent can't explain it. Every spend that isn't recognized is treated
+            as an unconnected service. Connecting yours closes the gap.
+        </p>
+    </div>
+
+    <h3>Case Study: NFT Mining (custom contract, no payment processor, no Stripe)</h3>
+    <p>
+        The NFT mining product is the reference case. It does most things itself: a custom contract takes a fee from
+        the user to initiate mining and distributes rewards (mega pool, omega pool, treasury split). It is fully
+        self-contained &mdash; it does <em>not</em> use the payment processor contract and it does <em>not</em> use Stripe.
+        That's fine. We don't need to take over its fee logic. We only need to <strong>capture the spend events</strong>
+        so the user has one place to track and prove their mining payments alongside everything else.
+    </p>
+
+    <h3>What You Need to Provide (the design-pattern checklist)</h3>
+    <p>
+        When asked to integrate, describe your payment design pattern using the items below. This is the exact
+        information the tracker needs to ingest and correctly label your spend events:
+    </p>
+    <table>
+        <tr><th>#</th><th>What to provide</th><th>Why the tracker needs it</th></tr>
+        <tr>
+            <td>1</td>
+            <td><strong>Contract address(es) + chain ID</strong> that receive user funds</td>
+            <td>So the scanner knows what to watch. One row per (address, chain).</td>
+        </tr>
+        <tr>
+            <td>2</td>
+            <td><strong>The fee/payment event signature</strong> emitted on a successful spend (name + indexed args)</td>
+            <td>The scanner subscribes to this event. Ideally it carries the payer address and the amount kept. e.g. <code>FeePaid(address indexed payer, uint256 amount, uint8 tier)</code></td>
+        </tr>
+        <tr>
+            <td>3</td>
+            <td><strong>Which field is the payer/user address</strong></td>
+            <td>This is the key the ledger groups by, and what resolves to a Pentagon identity (see buyer resolution in Section 6).</td>
+        </tr>
+        <tr>
+            <td>4</td>
+            <td><strong>Amount semantics</strong> &mdash; token, decimals, and whether the event amount is the amount <em>kept</em> vs amount <em>sent</em> (refunds?)</td>
+            <td>So the recorded spend equals what the user actually paid, not an over- or under-count. (Mining had exactly this kept-vs-sent nuance.)</td>
+        </tr>
+        <tr>
+            <td>5</td>
+            <td><strong>What the spend is for</strong> &mdash; a human label + a stable type/category (e.g. <code>mining_fee</code>, <code>boost_7day</code>)</td>
+            <td>So the explorer can show "Mining boost (7-day)" instead of an unknown transfer, and so unrecognized spends can be flagged.</td>
+        </tr>
+        <tr>
+            <td>6</td>
+            <td><strong>Any sub-type / tier dimension</strong> (e.g. 24h vs 7-day, mega vs omega)</td>
+            <td>Lets the ledger and revenue reporting attribute by tier. Emitting a distinct event or a tier arg makes this clean.</td>
+        </tr>
+        <tr>
+            <td>7</td>
+            <td><strong>Outcome/fulfillment reference</strong>, if any (reward tx, token id, raffle entry)</td>
+            <td>So "what happened after I paid" can be answered end-to-end, not just "you paid X".</td>
+        </tr>
+    </table>
+
+    <div class="card">
+        <h3>Design-pattern guidance: emit a clean, attributable event</h3>
+        <p>
+            The cheapest way to be trackable is to emit one explicit event per paid action, carrying the payer, the
+            amount <em>actually kept</em>, and a tier/type. Computing on the amount kept (after any refund of excess)
+            keeps the ledger consistent with on-chain reality.
+        </p>
+        <pre>
+// Recommended: distinct, attributable spend event
+event FeePaid(
+    address indexed payer,   // (3) user address -> resolves to PG identity
+    uint256 amount,          // (4) amount KEPT, in token's smallest unit
+    uint8   tier             // (6) e.g. 0 = 24h, 1 = 7-day
+);
+
+// Emit AFTER refunding excess, so amount == what the user actually paid:
+// uint256 kept = boostFee;
+// if (msg.value &gt; kept) payable(msg.sender).transfer(msg.value - kept);
+// emit FeePaid(msg.sender, kept, tier);
+        </pre>
+        <p style="color: var(--text-dim); font-size: 0.85rem;">
+            If retrofitting an existing contract isn't possible, you can instead provide a backend feed (a webhook or
+            a list of tx hashes + payer + amount + type) and we'll ingest that. On-chain events are preferred because
+            they're self-proving.
+        </p>
+    </div>
+
+    <h3>How Capture Works (cron / scanner pattern)</h3>
+    <p>
+        Once you provide the checklist above, the spend tracker watches your contract the same way the payment
+        processor's own scanners (<code>ef-scanner-pc</code> / <code>ef-scanner-eth</code>) watch the processor contract:
+    </p>
+    <div class="flow-diagram">
+Your contract emits FeePaid(payer, amount, tier)
+        │
+        ▼
+Spend Scanner (cron, polls every ~15s per watched contract)
+        │
+        ├─ Matches event signature you registered
+        ├─ Reads payer, amount(kept), tier, tx_hash, block, chain_id
+        ├─ Labels it via the type/category you provided
+        ├─ Resolves payer -> Pentagon identity (Section 6 buyer resolution)
+        └─ Writes a row to pg_payments_db (unified user spend ledger)
+        │
+        ▼
+Visible in: payments.pentagon.games (user portal)
+         and via /api/v1/payments?buyer=... (user/admin keys)
+         and to the user's AI agent via /mydata (Section 12)
+    </div>
+    <p style="color: var(--text-dim); font-size: 0.9rem;">
+        <strong>Unrecognized-spend detection:</strong> the tracker can also watch a user's general contract activity on
+        Pentagon Chain. Any spend that doesn't match a registered service surfaces as "unknown." That's the trigger to
+        find the owning team and walk them through this checklist.
+    </p>
+
+    <!-- USER AI AGENT ACCESS -->
+    <h2 id="user-agent">12. User AI Agent Access (mydata)</h2>
+
+    <p>
+        This section explains how a <strong>user's own AI agent</strong> reads payment information to help that user
+        understand and debug their spending. When a user runs a Pentagon AI agent, the agent is granted access to the
+        user's <code>mydata</code> endpoint, which exposes everything a logged-in user could themselves access across
+        the Pentagon ecosystem.
+    </p>
+
+    <div class="card">
+        <p>
+            <strong>Endpoint:</strong> <code>https://vip.pentagon.games/mydata</code><br>
+            <strong>Scope:</strong> one authenticated user's own data only &mdash; profile, NFTs, internal (AA) wallet,
+            <em>and</em> payment/spend history. The agent never sees other users' data through this path.
+        </p>
+    </div>
+
+    <h3>What mydata Exposes</h3>
+    <table>
+        <tr><th>Domain</th><th>Contents</th><th>Backed By</th></tr>
+        <tr><td>Profile / identity</td><td>username, PNS name, email, linked socials, VIP tier, wallets</td><td>Pentagon Identity API</td></tr>
+        <tr><td>NFT data</td><td>owned NFTs, metadata, images</td><td><a href="https://blockchainsuperheroes.github.io/pg-nft-data-docs/">NFT Data API</a></td></tr>
+        <tr><td>Internal wallet</td><td>AA wallet address, balances, NPC credits</td><td>Identity / wallet service</td></tr>
+        <tr><td><strong>Payment / spend history</strong></td><td>every captured spend: processor payments, Stripe, mining fees, campaign claims, custom-integration spends</td><td>This payment stack (<code>pg_payments_db</code>)</td></tr>
+    </table>
+
+    <h3>How the Agent Reads Payment Information</h3>
+    <p>
+        The payment portion of <code>mydata</code> is the user-scoped view of the same data described in Section 6,
+        bound to the authenticated user's wallet(s). Conceptually it returns (or links through to) the
+        <code>payments:read</code> view: only payments matching that user's bound wallet(s) or session.
+    </p>
+    <pre>
+// The user's agent calls mydata on the user's behalf (session-authenticated)
+GET https://vip.pentagon.games/mydata
+
+// Payment section (user-scoped; equivalent to /api/v1/payments/by-buyer/{own wallet})
+{
+  "payments": {
+    "total": 12,
+    "delivered": 11,
+    "pending": 0,
+    "failed": 1,
+    "items": [
+      {
+        "id": 8412,
+        "type": "mining_fee",            // label from the capturing integration
+        "label": "Mining boost (7-day)",
+        "chain_id": 3344,
+        "amount": "100000000000000000",   // amount actually kept
+        "amount_usd": 0.25,
+        "tx_hash": "0x7fa2cf58...",
+        "explorer_url": "https://explorer.pentagon.games/tx/0x7fa2cf58...",
+        "status": "completed",
+        "outcome": { "reward_tx_hash": "0x99d8...", "tier": "7day" },
+        "created_at": "2026-06-02T03:34:50Z"
+      }
+    ]
+  }
+}
+    </pre>
+
+    <h3>Answering "I made this spend, what happened?"</h3>
+    <p>A typical debugging flow the agent runs for its user:</p>
+    <ol>
+        <li>User asks: "I paid for a mining boost earlier, did it go through?"</li>
+        <li>Agent calls <code>GET /mydata</code> and reads the <code>payments</code> section (user-scoped, no admin key).</li>
+        <li>Agent finds the matching spend by recency / type / amount, reads its <code>status</code> and <code>outcome</code>.</li>
+        <li>Agent answers with the on-chain proof: the tx hash + explorer link, the recognized label, and whether the
+            reward/fulfillment completed.</li>
+        <li>If the spend shows as <code>unknown</code> (captured on-chain but unlabeled), that's the signal a service
+            isn't wired into the stack yet &mdash; the agent can flag it, and a builder should follow
+            <a href="#spend-capture">Section 11</a> to register it.</li>
+    </ol>
+
+    <div class="card">
+        <p style="color: var(--text-dim); font-size: 0.9rem;">
+            <strong>Security boundary:</strong> <code>mydata</code> is always scoped to the authenticated user. The
+            agent inherits the user's own visibility &mdash; it can see that user's contact fields and full spend
+            history, but never another buyer's. Admin-wide queries (<code>payments:read:all</code>) are a separate,
+            non-user path covered in Section 5.
+        </p>
+    </div>
 
     <footer>
         Pentagon Games &mdash; Payment Processor Documentation<br>
