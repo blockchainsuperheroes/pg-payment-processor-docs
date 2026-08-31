@@ -297,6 +297,19 @@ Read: /admin/payments/query   ·   Vendor receiving: payments.pentagon.games (Pr
     </p>
 
     <h3>Custodial Points &mdash; <code>spend_purchase</code> (TO BUILD)</h3>
+    <div class="card" style="border-color: var(--red);">
+        <p style="margin-bottom:0;">
+            <span class="badge" style="background:rgba(248,81,73,0.15);color:#f85149;">RULE</span>
+            <strong>Resolve the canonical wallet from identity &mdash; never derive it.</strong> Every
+            Points-consuming service MUST resolve the user's AA wallet from Pentagon Identity
+            (<code>user_wallet.address</code> today, <code>PGBalanceAccount</code> post-AA2). Identity wallets are
+            <em>random per-user</em> (keystore under WALLET_PASSWORD, no HD seed), so any independent or deterministic
+            derivation yields a <strong>different</strong> address and spends the wrong balance. Cautionary example:
+            NFT Mining derived wallets from its own <code>NPC_MASTER_SEED</code> and diverged from users' real Points
+            wallets (now migrating to resolve-not-derive). Payments is aligned &mdash; <code>resolve_aa_wallet</code>
+            returns identity's <code>user_wallet.address</code>, so SKU-17 Points credit the canonical wallet.
+        </p>
+    </div>
     <div class="card">
         <p>
             This is the one piece not yet built, and the reason "pay with Points" is blocked on storefronts today.
