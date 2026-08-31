@@ -130,6 +130,7 @@
         <strong>Quick Links:</strong>
         <ul class="toc">
             <li><a href="#overview">Overview</a></li>
+            <li><a href="#rails">Payment Rails (Standard &amp; Options)</a></li>
             <li><a href="#not-for">What This Is NOT</a></li>
             <li><a href="#contracts">Smart Contracts</a></li>
             <li><a href="#payment-flow">Payment Flow</a></li>
@@ -215,6 +216,157 @@
             <td>Stripe Checkout → webhook</td>
         </tr>
     </table>
+
+    <!-- PAYMENT RAILS (consolidated) -->
+    <h2 id="rails">Payment Rails &mdash; How to Charge a User (Standard &amp; Options)</h2>
+    <div class="card">
+        <p>
+            <strong>Going forward, the standard way to charge for anything in the Pentagon ecosystem is the
+            multichain Payment Processor</strong> (<code>purchaseWithNative</code> / <code>purchaseWithToken</code>).
+            Its defining benefit is <strong>multichain</strong>: the same SKU can be sold for native PC on Pentagon
+            Chain <em>or</em> USDC / PC-ERC-20 on Ethereum, through one contract and one settlement ledger
+            (<code>cross_chain_purchase_log</code> in <code>pg_payments_db</code>). New products should default to it.
+        </p>
+        <p style="margin-bottom:0;">
+            Other rails exist for specific cases &mdash; direct P2P pay with earn-back (CardSpendSplitter), in-game
+            action spend (PayHub), fiat (Stripe), and custodial Points spend &mdash; and are documented below so every
+            spend lands in the same ledger. But a SKU sale is the processor.
+        </p>
+    </div>
+
+    <table class="status-table">
+        <tr><th>Rail</th><th>Use for</th><th>Chains</th><th>Entry point</th><th>Status</th></tr>
+        <tr>
+            <td>Payment Processor <span class="badge badge-chain">STANDARD</span></td>
+            <td>SKU sales &mdash; NFT mints, digital packs, NPC top-ups, anything with a price</td>
+            <td>Pentagon (PC) + Ethereum (USDC / PC-ERC-20)</td>
+            <td><code>purchaseWithNative(skuId)</code> / <code>purchaseWithToken(skuId, token)</code> on <code>0x3930B34a…</code> (PC) / <code>0xe6bde156…</code> (ETH)</td>
+            <td><span class="badge badge-live">LIVE</span></td>
+        </tr>
+        <tr>
+            <td>Custodial Points (<code>spend_purchase</code>)</td>
+            <td>Let a logged-in user pay a processor SKU straight from their PG Points balance (AA wallet) &mdash; no wallet signing</td>
+            <td>Pentagon (backend signs AA wallet &rarr; processor)</td>
+            <td><code>POST /user/npc/spend_purchase</code> &rarr; <code>purchaseWithNative(skuId)</code></td>
+            <td><span class="badge badge-planned">TO BUILD</span></td>
+        </tr>
+        <tr>
+            <td>CardSpendSplitter (P2P direct + earn-back)</td>
+            <td>Direct peer/creator payments that split to payee + platform + a held / earn-back bucket</td>
+            <td>Pentagon (PC)</td>
+            <td><code>POST /user/npc/card-spend</code> &rarr; <code>CardSpendSplitter.pay(payee)</code></td>
+            <td><span class="badge badge-live">LIVE</span> (SKU 18)</td>
+        </tr>
+        <tr>
+            <td>PayHub (GamePayHub)</td>
+            <td>In-game action spend (AR mining boosts, etc.), attributed per game id</td>
+            <td>Pentagon (PC)</td>
+            <td><code>POST /user/npc/spend_ar</code> &rarr; <code>GamePayHub.payPC(gameId, paymentId)</code></td>
+            <td><span class="badge badge-live">LIVE</span></td>
+        </tr>
+        <tr>
+            <td>Stripe (fiat)</td>
+            <td>Credit-card purchases (Foundation Heroes, NPC credits)</td>
+            <td>Off-chain &rarr; webhook</td>
+            <td>Stripe Checkout &rarr; <code>/stripe/webhook</code></td>
+            <td><span class="badge badge-live">LIVE</span></td>
+        </tr>
+    </table>
+
+    <h3>The Standard Flow (multichain processor)</h3>
+    <p>One SKU, priced independently per chain/token, bought through one contract; one backend indexes all of it.</p>
+    <div class="flow-diagram">
+Buyer (own wallet OR custodial AA wallet)
+   │  purchaseWithNative(skuId){value: price}      ← Pentagon Chain, native PC
+   │  purchaseWithToken(skuId, USDC|PC-ERC20)      ← Ethereum
+   ▼
+PaymentProcessor  0x3930B34a… (PC) · 0xe6bde156… (ETH)   ── emits Payment event
+   ▼
+event_tracker (workers) → cross_chain_purchase_log (pg_payments_db), purchase_status='confirmed'
+   ▼
+reward_service by item_type:
+   nft          → mint via minter          token → send PC to AA wallet
+   digital_item → settle, NO drop (vendor/project delivers off-chain)
+   ▼
+Read: /admin/payments/query   ·   Vendor receiving: payments.pentagon.games (Projects)
+    </div>
+    <p style="color:var(--text-dim);font-size:0.9rem;">
+        <strong>Authoritative store:</strong> <code>pg_payments_db</code> (RDS) holds all payment info. The
+        <code>pg_identity_db</code> copy of these tables is legacy/frozen &mdash; never read settlement from it.
+        Identity touches payments <em>only</em> at the AA-wallet signing step.
+    </p>
+
+    <h3>Custodial Points &mdash; <code>spend_purchase</code> (TO BUILD)</h3>
+    <div class="card">
+        <p>
+            This is the one piece not yet built, and the reason "pay with Points" is blocked on storefronts today.
+            It lets a logged-in user pay a processor SKU from their PG Points balance without signing: the backend
+            derives the user's AA wallet key and calls <code>purchaseWithNative(skuId)</code> server-side. It is a
+            sibling of the existing <code>/user/npc/spend_ar</code> &mdash; same custodial-signing infra, pointed at
+            the processor instead of PayHub. Build it as a Django endpoint on the accounts backend.
+        </p>
+        <p style="margin-bottom:0;">
+            <strong>Reference implementation:</strong> <code>user/airdrop_confirm_view.py</code> in
+            <code>pentagon-login-backend</code> ran this exact sequence for the $CT airdrop
+            (6,786 allocations, zero double-pays, zero nonce collisions). Copy its ordering &mdash; the order IS the point.
+        </p>
+    </div>
+    <pre>def spend_purchase(user, sku_id):
+    # 1) IDEMPOTENCY FIRST — write the intent row BEFORE any chain action.
+    #    UNIQUE(user_id, sku, intent_nonce) → retries/double-clicks collapse to IntegrityError.
+    try:
+        ledger = PayoutLedger.objects.create(user=user, sku=sku_id, status="pending")
+    except IntegrityError:
+        return existing_row_status(user, sku_id)            # never a second send
+
+    # 2) NONCE SERIALIZATION — one Postgres advisory lock PER SENDER ADDRESS, held
+    #    ACROSS get_nonce → sign → send (works across all gunicorn workers/boxes).
+    with pg_advisory_lock(key=hash64(sender_address)):
+        nonce   = w3.eth.get_transaction_count(sender_address)
+        tx      = processor.functions.purchaseWithNative(sku_id).build_transaction(
+                      {"nonce": nonce, "value": price_wei, ...})
+        signed  = w3.eth.account.sign_transaction(tx, aa_key)
+        tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+    # lock released only AFTER send — no other worker can grab the same nonce
+
+    # 3) settle ledger from the receipt (async poll): pending → confirmed/failed
+    ledger.mark(tx_hash)</pre>
+    <table>
+        <tr><th>Trap</th><th>Rule</th></tr>
+        <tr><td>Double-pay on retry</td><td>Idempotency row must be written <strong>BEFORE</strong> the send, deduped by a DB <strong>UNIQUE constraint</strong> (not an <code>if-exists</code> check &mdash; that races).</td></tr>
+        <tr><td>Nonce collision under click-storms</td><td>The advisory lock must span <code>get_nonce</code> <strong>through</strong> <code>send_raw_transaction</code>. Lock only around <code>get_nonce</code> = two workers sign the same nonce; one tx silently replaces the other.</td></tr>
+        <tr><td>Timeout after send</td><td>Do <strong>NOT</strong> auto-retry the send (the tx may still land). Mark the row <code>unknown</code> and reconcile from the on-chain Payment event.</td></tr>
+    </table>
+
+    <h3>Build Status &mdash; what's live vs. what to build</h3>
+    <table class="status-table">
+        <tr><th>Capability</th><th>Status</th><th>Owner</th></tr>
+        <tr><td>SKU config + on-chain price (any SKU, any chain)</td><td><span class="badge badge-live">LIVE</span></td><td>payments admin (/admin/payments)</td></tr>
+        <tr><td>Direct-wallet purchase (PC / USDC / PC-ERC-20)</td><td><span class="badge badge-live">LIVE</span></td><td>processor + hosted checkout</td></tr>
+        <tr><td>Record → settle → vendor dashboard</td><td><span class="badge badge-live">LIVE</span></td><td>event_tracker + reward_service + payments.pg</td></tr>
+        <tr><td>Hosted checkout (any app links to it)</td><td><span class="badge badge-live">LIVE</span></td><td><code>payments.pentagon.games/pay?project=&lt;key&gt;</code></td></tr>
+        <tr><td><strong>Custodial Points payment</strong> (<code>spend_purchase</code>)</td><td><span class="badge badge-planned">TO BUILD</span></td><td>accounts backend (Django)</td></tr>
+        <tr><td><strong>Project-managed delivery report</strong> (project_orders + allocation)</td><td><span class="badge badge-planned">TO BUILD</span></td><td>integration API + vendor</td></tr>
+    </table>
+
+    <h3>Worked Example &mdash; TCG / KEEPS packs (project-managed digital items)</h3>
+    <div class="card">
+        <p>The KEEPS card packs (tcg.etherfantasy.com) are live SKUs on the processor, sold for native PC:</p>
+        <table>
+            <tr><th>Pack</th><th>SKU</th><th>Price</th><th>Points</th><th>item_type</th></tr>
+            <tr><td>keeps_pack_x1</td><td>22</td><td>0.025 PC</td><td>25</td><td>digital_item</td></tr>
+            <tr><td>keeps_pack_x5</td><td>23</td><td>0.125 PC</td><td>125</td><td>digital_item</td></tr>
+            <tr><td>keeps_pack_x10</td><td>24</td><td>0.25 PC</td><td>250</td><td>digital_item</td></tr>
+        </table>
+        <p>
+            Added via <code>/admin/payments</code> (register config row → owner signs <code>setPrice</code> on-chain →
+            activate). A buyer purchases at
+            <code>payments.pentagon.games/pay?project=prj_tcg</code> (PG login → "credited to @username" → pay PC).
+            The processor records + settles it (<code>digital_item</code> = no on-chain drop); EtherFantasy delivers
+            the packs off-chain and reports the pack/card allocation back via the delivery endpoint (TO BUILD).
+            Points payment for these packs lights up when <code>spend_purchase</code> ships.
+        </p>
+    </div>
 
     <!-- WHAT THIS IS NOT -->
     <h2 id="not-for">What This Is NOT</h2>
@@ -375,6 +527,9 @@ User → Stripe Checkout Session (pentagon.games/account)
         <tr><td><code>14</code></td><td>Avax Hero — Launch</td><td>Avalanche</td><td>$50</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
         <tr><td><code>15</code></td><td>BNB Hero — Sentinel</td><td>BSC</td><td>$400</td><td>Centralized mint + gas bonus</td><td>✅ Live</td></tr>
         <tr><td><code>17</code></td><td>1000 NPC Credits</td><td>PC (3344)</td><td>$35</td><td>Centralized (token send)</td><td>✅ Live</td></tr>
+        <tr><td><code>22</code></td><td>KEEPS Pack x1 (TCG)</td><td>PC (3344)</td><td>~$1 (0.025 PC)</td><td><strong>Project-managed</strong> (digital_item, EF delivers)</td><td>✅ Live</td></tr>
+        <tr><td><code>23</code></td><td>KEEPS Pack x5 (TCG)</td><td>PC (3344)</td><td>~$5 (0.125 PC)</td><td><strong>Project-managed</strong> (digital_item, EF delivers)</td><td>✅ Live</td></tr>
+        <tr><td><code>24</code></td><td>KEEPS Pack x10 (TCG)</td><td>PC (3344)</td><td>~$10 (0.25 PC)</td><td><strong>Project-managed</strong> (digital_item, EF delivers)</td><td>✅ Live</td></tr>
     </table>
 
     <h3 id="fulfillment-modes">Fulfillment Modes</h3>
@@ -478,6 +633,19 @@ curl -H "X-PG-App-Key: pk_live_your_key" \
 
     <!-- API -->
     <h2 id="api">6. API Endpoints</h2>
+
+    <div class="card" style="border-color: var(--orange);">
+        <p style="margin-bottom:0;">
+            <span class="badge badge-planned">HEADS UP</span>
+            <strong>Built vs. documented:</strong> the <code>/api/v1/payments/*</code> read endpoints below are a
+            <em>design target, not yet built</em> (calling <code>/api/v1/payments/by-buyer/…</code> returns 404 today).
+            What actually exists on <code>api.account.pentagon.games</code>: <code>POST /payment/register</code>,
+            <code>POST /payment/status</code>, <code>/stripe/webhook</code>, <code>/stripe/payment_status</code>, and
+            <code>GET /admin/payments/query</code> (the canonical read, auth via a dedicated <code>PAYMENTS_READ_KEY</code>,
+            not the god key). All read the <strong>live</strong> <code>pg_payments_db</code> via the <code>PAYMENTS_DB</code>
+            alias. Build new integrations against those; treat <code>/api/v1/*</code> as roadmap until marked LIVE.
+        </p>
+    </div>
 
     <div class="card">
         <h3>Infrastructure Note</h3>
