@@ -7,6 +7,7 @@ spend Points, or deliver goods through the Pentagon payment stack.
 
 | Doc | What it's for |
 |---|---|
+| [ONBOARDING.md](./ONBOARDING.md) | **Start here as a new project.** Request your OWN clean rails (your own project + SKUs — never reuse another's), the exact "ask us to enable" steps, and copy‑ready **sample code** for charging Points. |
 | [INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md) | End‑to‑end integration: sign‑in → read Points wallet → top‑up → charge → receipt. The two integration shapes (logged‑in player vs frictionless guest/email). Every endpoint. |
 | [PAYMENT-FLOWS.md](./PAYMENT-FLOWS.md) | **Complete worked examples** per real product: logged‑in Points (AR / Stores), guest email checkout (Gunnies rolls / pfp‑maker), MOBA play tickets, card top‑up, vendor‑delivered packs (KEEPS), on‑chain NFTs (BCSH heroes). Copy‑ready. |
 | [RECEIPT-CONTRACT.md](./RECEIPT-CONTRACT.md) | Delivery proof + receipts: the 3‑category decision tree (on‑chain auto / vendor off‑chain / off‑processor) and the exact contracts. |
